@@ -2,7 +2,7 @@
 """
 SLURM Dashboard - Proxy Server
 slurmrestd API에 JWT 인증을 자동으로 붙여서 브라우저에 전달하는 프록시.
-W&B API를 GraphQL로 중계하여 실험 데이터를 제공.
+로컬 TensorBoard 이벤트 파일에서 실험 데이터를 직접 읽어 시각화.
 """
 
 import http.server
@@ -16,10 +16,8 @@ import time
 
 PORT = 3080
 SLURMRESTD_URL = os.environ.get("SLURMRESTD_URL", "http://localhost:6820")
+TENSORBOARD_URL = os.environ.get("TENSORBOARD_URL", "http://localhost:6006")
 SLURM_API_VERSION = os.environ.get("SLURM_API_VERSION", "v0.0.44")
-WANDB_API_KEY = os.environ.get("WANDB_API_KEY", "")
-WANDB_ENTITY = os.environ.get("WANDB_ENTITY", "")
-WANDB_BASE_URL = os.environ.get("WANDB_BASE_URL", "https://api.wandb.ai")
 STATIC_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # JWT token cache
@@ -31,7 +29,6 @@ def get_jwt_token():
     now = time.time()
     if _jwt_cache["token"] and _jwt_cache["expires"] > now:
         return _jwt_cache["token"]
-
     try:
         result = subprocess.run(
             ["docker", "exec", "slurmctld", "scontrol", "token"],
@@ -41,11 +38,20 @@ def get_jwt_token():
             if "SLURM_JWT=" in line:
                 token = line.split("=", 1)[1].strip()
                 _jwt_cache["token"] = token
-                _jwt_cache["expires"] = now + 1500  # cache for 25 min
+                _jwt_cache["expires"] = now + 1500
                 return token
     except Exception as e:
         print(f"Error getting JWT: {e}")
     return None
+
+
+def docker_exec(cmd_str, timeout=15):
+    """Execute a command inside slurmctld container and return stdout."""
+    result = subprocess.run(
+        ["docker", "exec", "slurmctld", "bash", "-c", cmd_str],
+        capture_output=True, text=True, timeout=timeout
+    )
+    return result.stdout, result.stderr
 
 
 class DashboardHandler(http.server.SimpleHTTPRequestHandler):
@@ -53,8 +59,19 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         super().__init__(*args, directory=STATIC_DIR, **kwargs)
 
     def do_GET(self):
-        if self.path.startswith("/wandb/"):
-            self.handle_wandb()
+        if self.path.startswith("/tb/"):
+            self.proxy_tensorboard()
+        elif self.path.startswith("/data/plugin/"):
+            # TensorBoard API calls (used by embedded TB frontend)
+            self.proxy_tensorboard()
+        elif self.path.startswith("/api/runs"):
+            self.handle_training_runs()
+        elif self.path.startswith("/api/run-history"):
+            self.handle_run_history()
+        elif self.path.startswith("/api/run-log"):
+            self.handle_run_log()
+        elif self.path.startswith("/api/tb-status"):
+            self.handle_tb_status()
         elif self.path.startswith("/api/"):
             self.proxy_api()
         else:
@@ -89,7 +106,6 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         time_limit = data.get("time_limit", "")
         command = data.get("command", "hostname")
 
-        # Build sbatch command
         cmd = ["docker", "exec", "slurmctld", "bash", "-c"]
         sbatch = f"cd /data && sbatch --job-name={job_name}"
         if partition:
@@ -123,12 +139,10 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         except json.JSONDecodeError:
             self.send_error_json(400, "Invalid JSON")
             return
-
         job_id = data.get("job_id", "")
         if not job_id:
             self.send_error_json(400, "job_id required")
             return
-
         try:
             result = subprocess.run(
                 ["docker", "exec", "slurmctld", "scancel", str(job_id)],
@@ -145,23 +159,17 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         if not token:
             self.send_error_json(500, "Failed to get JWT token")
             return
-
-        # Map /api/nodes -> /slurm/v0.0.44/nodes
-        api_path = self.path[4:]  # remove /api
-        # strip query string for mapping
+        api_path = self.path[4:]
         path_part = api_path.split("?")[0]
         query = ""
         if "?" in api_path:
             query = "?" + api_path.split("?", 1)[1]
-
         url = f"{SLURMRESTD_URL}/slurm/{SLURM_API_VERSION}{path_part}{query}"
-
         headers = {
             "X-SLURM-USER-TOKEN": token,
             "X-SLURM-USER-NAME": "root",
             "Accept": "application/json",
         }
-
         try:
             req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=10) as resp:
@@ -177,145 +185,219 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         except Exception as e:
             self.send_error_json(502, f"Proxy error: {str(e)}")
 
-    # ==================== W&B API ====================
+    # ==================== TensorBoard Proxy ====================
 
-    def handle_wandb(self):
-        """Route /wandb/* requests to appropriate handler."""
+    def proxy_tensorboard(self, method="GET", body=None):
+        """Proxy requests to TensorBoard server."""
+        # Strip /tb/ prefix if present, otherwise pass as-is
+        if self.path.startswith("/tb/"):
+            tb_path = self.path[3:]  # /tb/foo -> /foo
+        else:
+            tb_path = self.path  # /data/plugin/... -> /data/plugin/...
+
+        url = f"{TENSORBOARD_URL}{tb_path}"
+        try:
+            req = urllib.request.Request(url, data=body, method=method)
+            req.add_header("Accept", self.headers.get("Accept", "*/*"))
+            if self.headers.get("Content-Type"):
+                req.add_header("Content-Type", self.headers["Content-Type"])
+
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = resp.read()
+                self.send_response(resp.status)
+                # Forward content type
+                ct = resp.headers.get("Content-Type", "application/octet-stream")
+                self.send_header("Content-Type", ct)
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(data)
+        except urllib.error.HTTPError as e:
+            body_err = e.read().decode("utf-8", errors="replace")
+            self.send_error_json(e.code, f"TensorBoard error: {body_err[:200]}")
+        except Exception as e:
+            self.send_error_json(502, f"TensorBoard proxy error: {str(e)}")
+
+    def handle_tb_status(self):
+        """GET /api/tb-status - check if TensorBoard is running."""
+        try:
+            req = urllib.request.Request(f"{TENSORBOARD_URL}/", method="GET")
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                self.send_json({"status": "running", "url": TENSORBOARD_URL})
+        except Exception:
+            self.send_json({"status": "stopped", "url": TENSORBOARD_URL})
+
+    # ==================== TensorBoard-based Training Runs ====================
+
+    def handle_training_runs(self):
+        """GET /api/runs - scan /data for TensorBoard event files."""
+        try:
+            # Find all TensorBoard event files
+            stdout, _ = docker_exec(
+                "find /data -name 'events.out.tfevents.*' -type f 2>/dev/null | sort -r | head -100",
+                timeout=30
+            )
+            runs = []
+            seen_dirs = set()
+
+            for event_path in stdout.strip().splitlines():
+                if not event_path:
+                    continue
+                tb_dir = os.path.dirname(event_path)
+                if tb_dir in seen_dirs:
+                    continue
+                seen_dirs.add(tb_dir)
+
+                # Determine the training run root directory
+                # Common patterns:
+                #   /data/.../output/training_log/.../tb/events.out.tfevents.*
+                #   /data/.../logs/events.out.tfevents.*
+                #   /data/.../tensorboard/events.out.tfevents.*
+                train_dir = tb_dir
+                dir_name = os.path.basename(tb_dir)
+                if dir_name in ("tb", "tensorboard", "logs", "tfevent"):
+                    train_dir = os.path.dirname(tb_dir)
+
+                # Extract run name from directory structure
+                run_name = os.path.basename(train_dir)
+                project_name = os.path.basename(os.path.dirname(train_dir))
+                if project_name in ("training_log", "output", "logs"):
+                    project_name = os.path.basename(os.path.dirname(os.path.dirname(train_dir)))
+
+                # Get event file info for timing
+                stat_out, _ = docker_exec(f"stat -c '%Y' '{event_path}' 2>/dev/null")
+                mtime = int(stat_out.strip()) if stat_out.strip().isdigit() else 0
+                started_at = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(mtime)) if mtime else ""
+
+                # Check if still being written (running vs finished)
+                age_out, _ = docker_exec(
+                    f"echo $(( $(date +%s) - $(stat -c '%Y' '{event_path}') ))"
+                )
+                try:
+                    age_seconds = int(age_out.strip())
+                    state = "running" if age_seconds < 300 else "finished"
+                except (ValueError, TypeError):
+                    state = "finished"
+
+                # Read scalar tags summary (quick peek at what metrics exist)
+                tags_out, _ = docker_exec(
+                    f"""python3 -c "
+import json
+from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
+ea = EventAccumulator('{tb_dir}', size_guidance={{'scalars': 1}})
+ea.Reload()
+tags = ea.Tags().get('scalars', [])
+# Get last value for each tag
+summary = {{}}
+for tag in tags:
+    events = ea.Scalars(tag)
+    if events:
+        summary[tag] = round(events[-1].value, 6)
+print(json.dumps({{'tags': tags, 'summary': summary}}))
+" 2>/dev/null""",
+                    timeout=10
+                )
+                try:
+                    tags_data = json.loads(tags_out.strip())
+                    tags = tags_data.get("tags", [])
+                    summary = tags_data.get("summary", {})
+                except (json.JSONDecodeError, ValueError):
+                    tags = []
+                    summary = {}
+
+                runs.append({
+                    "id": run_name,
+                    "tb_dir": tb_dir,
+                    "train_dir": train_dir,
+                    "project": project_name,
+                    "display_name": run_name,
+                    "state": state,
+                    "started_at": started_at,
+                    "tags": tags,
+                    "summary": summary,
+                })
+
+            self.send_json({"runs": runs})
+        except Exception as e:
+            self.send_error_json(500, f"Error scanning runs: {str(e)}")
+
+    def handle_run_history(self):
+        """GET /api/run-history?tb_dir=<tb_dir> - parse TensorBoard event files."""
         parsed = urllib.parse.urlparse(self.path)
-        path = parsed.path
         qs = urllib.parse.parse_qs(parsed.query)
+        tb_dir = qs.get("tb_dir", [""])[0]
+
+        if not tb_dir or ".." in tb_dir:
+            self.send_error_json(400, "Invalid tb_dir parameter")
+            return
 
         try:
-            if path == "/wandb/projects":
-                self._wandb_projects()
-            elif path == "/wandb/runs":
-                self._wandb_runs(qs.get("project", [""])[0])
-            elif path == "/wandb/history":
-                self._wandb_history(
-                    qs.get("project", [""])[0],
-                    qs.get("run", [""])[0],
-                )
-            else:
-                self.send_error_json(404, "Unknown wandb endpoint")
+            # Use tensorboard's EventAccumulator inside the container
+            history_out, err = docker_exec(
+                f"""python3 -c "
+import json
+from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
+
+ea = EventAccumulator('{tb_dir}', size_guidance={{'scalars': 0}})
+ea.Reload()
+tags = ea.Tags().get('scalars', [])
+
+# Build a step-indexed dict
+step_data = {{}}
+for tag in tags:
+    for event in ea.Scalars(tag):
+        step = event.step
+        if step not in step_data:
+            step_data[step] = {{'_step': step, '_wall_time': event.wall_time}}
+        step_data[step][tag] = event.value
+
+# Sort by step and output
+history = sorted(step_data.values(), key=lambda x: x['_step'])
+print(json.dumps({{'history': history, 'tags': tags}}))
+" 2>/dev/null""",
+                timeout=30
+            )
+            try:
+                result = json.loads(history_out.strip())
+                self.send_json(result)
+            except (json.JSONDecodeError, ValueError):
+                self.send_json({"history": [], "tags": [], "error": err.strip()[:200] if err else "Parse error"})
         except Exception as e:
-            self.send_error_json(500, f"W&B API error: {str(e)}")
+            self.send_error_json(500, f"Error reading history: {str(e)}")
 
-    def _wandb_gql(self, query, variables=None):
-        """Execute a GraphQL query against the W&B API."""
-        if not WANDB_API_KEY:
-            raise Exception("WANDB_API_KEY not set")
-        url = f"{WANDB_BASE_URL}/graphql"
-        headers = {
-            "Authorization": f"Bearer {WANDB_API_KEY}",
-            "Content-Type": "application/json",
-        }
-        payload = json.dumps({"query": query, "variables": variables or {}}).encode()
-        req = urllib.request.Request(url, data=payload, headers=headers)
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            data = json.loads(resp.read())
-        if "errors" in data:
-            raise Exception(data["errors"][0].get("message", "GraphQL error"))
-        return data.get("data", {})
+    def handle_run_log(self):
+        """GET /api/run-log?dir=<train_dir>&lines=100 - return raw log output."""
+        parsed = urllib.parse.urlparse(self.path)
+        qs = urllib.parse.parse_qs(parsed.query)
+        train_dir = qs.get("dir", [""])[0]
+        max_lines = int(qs.get("lines", ["200"])[0])
 
-    def _wandb_projects(self):
-        """List W&B projects for the configured entity."""
-        query = """
-        query($entity: String!) {
-          entity(name: $entity) {
-            projects(first: 100) {
-              edges {
-                node { name description runCount }
-              }
-            }
-          }
-        }
-        """
-        data = self._wandb_gql(query, {"entity": WANDB_ENTITY})
-        edges = data.get("entity", {}).get("projects", {}).get("edges", [])
-        projects = []
-        for edge in edges:
-            node = edge["node"]
-            projects.append({
-                "name": node["name"],
-                "description": node.get("description", ""),
-                "run_count": node.get("runCount", 0),
-            })
-        self.send_json({
-            "projects": projects,
-            "entity": WANDB_ENTITY,
-            "base_url": WANDB_BASE_URL.replace("api.wandb.ai", "wandb.ai"),
-        })
+        if not train_dir or ".." in train_dir:
+            self.send_error_json(400, "Invalid dir parameter")
+            return
 
-    def _wandb_runs(self, project):
-        """List runs for a W&B project."""
-        query = """
-        query($entity: String!, $project: String!) {
-          project(name: $project, entityName: $entity) {
-            runs(first: 50, order: "-created_at") {
-              edges {
-                node {
-                  id name displayName state
-                  config summaryMetrics
-                  createdAt heartbeatAt tags
-                }
-              }
-            }
-          }
-        }
-        """
-        data = self._wandb_gql(query, {"entity": WANDB_ENTITY, "project": project})
-        edges = data.get("project", {}).get("runs", {}).get("edges", [])
-        runs = []
-        for edge in edges:
-            node = edge["node"]
-            # Parse config JSON and flatten wandb's {key: {value: X}} format
-            raw_config = json.loads(node.get("config") or "{}")
-            config = {}
-            for k, v in raw_config.items():
-                if k.startswith("_"):
+        try:
+            # Find related log files (.out and .err from Slurm)
+            logs_out, _ = docker_exec(
+                f"find '{train_dir}' -maxdepth 3 -name '*.out' -o -name '*.log' 2>/dev/null | sort -r | head -5; "
+                f"find /data -maxdepth 4 -name 'train_*.out' 2>/dev/null | sort -r | head -5"
+            )
+
+            stdout_log = ""
+            stderr_log = ""
+            for log_path in logs_out.strip().splitlines():
+                if not log_path:
                     continue
-                if isinstance(v, dict) and "value" in v:
-                    config[k] = v["value"]
-                else:
-                    config[k] = v
-            # Parse summary metrics JSON
-            summary = json.loads(node.get("summaryMetrics") or "{}")
-            # Filter out internal wandb keys from summary
-            summary = {k: v for k, v in summary.items() if not k.startswith("_")}
-            runs.append({
-                "id": node["id"],
-                "name": node["name"],
-                "display_name": node.get("displayName", node["name"]),
-                "state": node.get("state", "unknown"),
-                "config": config,
-                "summary": summary,
-                "created_at": node.get("createdAt", ""),
-                "tags": node.get("tags", []),
-            })
-        self.send_json({"runs": runs, "entity": WANDB_ENTITY, "project": project})
+                content, _ = docker_exec(f"tail -n {max_lines} '{log_path}' 2>/dev/null")
+                stdout_log = content
+                # Also get corresponding .err file
+                err_path = log_path.replace(".out", ".err")
+                err_content, _ = docker_exec(f"tail -n {max_lines} '{err_path}' 2>/dev/null")
+                stderr_log = err_content
+                break
 
-    def _wandb_history(self, project, run_name):
-        """Get metric history for a specific run."""
-        query = """
-        query($entity: String!, $project: String!, $runName: String!) {
-          project(name: $project, entityName: $entity) {
-            run(name: $runName) {
-              history(samples: 500)
-            }
-          }
-        }
-        """
-        data = self._wandb_gql(
-            query,
-            {"entity": WANDB_ENTITY, "project": project, "runName": run_name},
-        )
-        raw = data.get("project", {}).get("run", {}).get("history", [])
-        history = []
-        for row in raw:
-            if isinstance(row, str):
-                row = json.loads(row)
-            history.append(row)
-        self.send_json({"history": history})
+            self.send_json({"stdout": stdout_log, "stderr": stderr_log})
+        except Exception as e:
+            self.send_error_json(500, f"Error reading log: {str(e)}")
 
     # ==================== Helpers ====================
 
@@ -335,17 +417,16 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         self.wfile.write(json.dumps({"error": message}).encode())
 
     def log_message(self, format, *args):
-        # Only log API calls, not static files
-        if "/api/" in (args[0] if args else "") or "/wandb/" in (args[0] if args else ""):
+        first_arg = str(args[0]) if args else ""
+        if "/api/" in first_arg:
             super().log_message(format, *args)
 
 
 if __name__ == "__main__":
     print(f"SLURM Dashboard starting on http://localhost:{PORT}")
     print(f"slurmrestd backend: {SLURMRESTD_URL}")
+    print(f"TensorBoard backend: {TENSORBOARD_URL}")
     print(f"API version: {SLURM_API_VERSION}")
-    print(f"W&B entity: {WANDB_ENTITY or '(not set)'}")
-    print(f"W&B API key: {'configured' if WANDB_API_KEY else 'NOT SET'}")
     server = http.server.HTTPServer(("0.0.0.0", PORT), DashboardHandler)
     try:
         server.serve_forever()

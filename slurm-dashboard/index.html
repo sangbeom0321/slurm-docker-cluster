@@ -45,8 +45,15 @@
                 Experiments
             </a>
         </nav>
-        <div class="p-4 border-t border-slate-100 text-xs text-slate-400">
-            SLURM 25.11.2 | Auto-refresh 10s
+        <div class="p-4 border-t border-slate-100">
+            <label class="block text-xs text-slate-400 font-semibold uppercase tracking-wider mb-2">User</label>
+            <select id="current-user" onchange="onUserChange()" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-medium text-slate-700 bg-white focus:ring-2 focus:ring-blue-500 outline-none">
+                <option value="">-- Select --</option>
+                <option value="daniel">daniel</option>
+                <option value="woosang">woosang</option>
+                <option value="jihoon">jihoon</option>
+            </select>
+            <p class="text-xs text-slate-400 mt-2">SLURM 25.11.2 | Auto-refresh 10s</p>
         </div>
     </aside>
 
@@ -56,6 +63,7 @@
             <h1 class="text-xl font-bold text-slate-800" id="page-title">Overview</h1>
             <div class="flex items-center gap-4">
                 <span class="text-xs text-slate-400" id="last-update"></span>
+                <span id="header-user" class="px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-sm font-medium hidden"></span>
                 <button onclick="refreshAll()" class="px-4 py-2 text-sm bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 font-medium">Refresh</button>
             </div>
         </header>
@@ -115,6 +123,15 @@
                     <h3 class="text-lg font-bold text-slate-800 mb-6">Submit New Job</h3>
                     <div class="grid grid-cols-2 gap-5 mb-5">
                         <div>
+                            <label class="block text-sm font-medium text-slate-600 mb-1">Submitted by</label>
+                            <select id="f-user" class="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white">
+                                <option value="">-- Select User --</option>
+                                <option value="daniel">daniel</option>
+                                <option value="woosang">woosang</option>
+                                <option value="jihoon">jihoon</option>
+                            </select>
+                        </div>
+                        <div>
                             <label class="block text-sm font-medium text-slate-600 mb-1">Job Name</label>
                             <input type="text" id="f-name" value="my_job" class="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
                         </div>
@@ -159,8 +176,21 @@
             <!-- ==================== JOBS PAGE ==================== -->
             <div id="page-jobs" class="hidden">
                 <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                    <div class="p-6 border-b border-slate-100">
+                    <div class="p-6 border-b border-slate-100 flex justify-between items-center">
                         <h3 class="text-lg font-bold text-slate-800">All Jobs</h3>
+                        <div class="flex items-center gap-3">
+                            <label class="text-sm text-slate-500">Filter:</label>
+                            <select id="jobs-user-filter" onchange="renderJobsPage()" class="px-3 py-1.5 border border-slate-200 rounded-lg text-sm bg-white outline-none">
+                                <option value="">All Users</option>
+                                <option value="daniel">daniel</option>
+                                <option value="woosang">woosang</option>
+                                <option value="jihoon">jihoon</option>
+                            </select>
+                            <label class="flex items-center gap-1.5 text-sm text-slate-500 cursor-pointer">
+                                <input type="checkbox" id="jobs-mine-only" onchange="onMineOnlyToggle()" class="rounded border-slate-300">
+                                My Jobs Only
+                            </label>
+                        </div>
                     </div>
                     <div id="jobs-table"></div>
                 </div>
@@ -173,43 +203,69 @@
 
             <!-- ==================== EXPERIMENTS PAGE ==================== -->
             <div id="page-experiments" class="hidden">
-                <!-- Experiment selector -->
-                <div class="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm mb-6">
-                    <div class="flex items-center justify-between mb-4">
-                        <h3 class="text-lg font-bold text-slate-800">Projects / Experiments</h3>
-                        <a id="wandb-link" href="https://wandb.ai" target="_blank" class="text-sm text-blue-600 hover:underline">Open W&B</a>
+                <!-- View toggle: Runs list vs TensorBoard -->
+                <div class="flex items-center gap-3 mb-6">
+                    <div class="bg-white rounded-xl border border-slate-200 shadow-sm inline-flex p-1">
+                        <button onclick="setExpView('runs')" id="exp-view-runs" class="px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white">Runs</button>
+                        <button onclick="setExpView('tensorboard')" id="exp-view-tb" class="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-50">TensorBoard</button>
                     </div>
-                    <div class="flex flex-wrap gap-2" id="exp-tabs"></div>
+                    <span id="tb-status-badge" class="text-xs text-slate-400"></span>
                 </div>
 
-                <!-- Run list -->
-                <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden mb-6">
-                    <div class="p-6 border-b border-slate-100">
-                        <h3 class="text-lg font-bold text-slate-800" id="exp-runs-title">Runs</h3>
-                    </div>
-                    <div id="exp-runs-table"></div>
-                </div>
-
-                <!-- Run detail -->
-                <div id="exp-run-detail" class="hidden">
-                    <div class="grid grid-cols-2 gap-6">
-                        <!-- Parameters -->
-                        <div class="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
-                            <h3 class="text-lg font-bold text-slate-800 mb-4">Parameters</h3>
-                            <div id="run-params" class="space-y-2"></div>
+                <!-- === Runs View === -->
+                <div id="exp-runs-view">
+                    <!-- Project filter tabs -->
+                    <div class="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm mb-6">
+                        <div class="flex items-center justify-between mb-4">
+                            <h3 class="text-lg font-bold text-slate-800">Training Runs</h3>
+                            <span id="exp-scan-status" class="text-xs text-slate-400"></span>
                         </div>
+                        <div class="flex flex-wrap gap-2 mb-2" id="exp-tabs"></div>
+                    </div>
+
+                    <!-- Run list -->
+                    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden mb-6">
+                        <div class="p-6 border-b border-slate-100">
+                            <h3 class="text-lg font-bold text-slate-800" id="exp-runs-title">Runs</h3>
+                        </div>
+                        <div id="exp-runs-table"></div>
+                    </div>
+
+                    <!-- Run detail -->
+                    <div id="exp-run-detail" class="hidden">
                         <!-- Metrics summary -->
+                        <div class="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm mb-6">
+                            <h3 class="text-lg font-bold text-slate-800 mb-4">Final Metrics</h3>
+                            <div id="run-metrics" class="grid grid-cols-4 gap-4"></div>
+                        </div>
+                        <!-- Metric charts (dynamically generated) -->
                         <div class="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
-                            <h3 class="text-lg font-bold text-slate-800 mb-4">Metrics</h3>
-                            <div id="run-metrics" class="space-y-2"></div>
+                            <h3 class="text-lg font-bold text-slate-800 mb-4">Training Curves</h3>
+                            <div id="charts-container" class="grid grid-cols-2 gap-6"></div>
                         </div>
                     </div>
-                    <!-- Metric charts -->
-                    <div class="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm mt-6">
-                        <h3 class="text-lg font-bold text-slate-800 mb-4">Training Curves</h3>
-                        <div class="grid grid-cols-2 gap-6">
-                            <canvas id="chart-loss" height="200"></canvas>
-                            <canvas id="chart-acc" height="200"></canvas>
+                </div>
+
+                <!-- === TensorBoard View === -->
+                <div id="exp-tb-view" class="hidden">
+                    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden" style="height: calc(100vh - 220px);">
+                        <div class="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+                            <div class="flex items-center gap-3">
+                                <h3 class="text-sm font-bold text-slate-700">TensorBoard</h3>
+                                <span id="tb-logdir" class="text-xs text-slate-400">logdir: /data</span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <button onclick="reloadTensorBoard()" class="px-3 py-1.5 text-xs bg-slate-200 text-slate-600 rounded-lg hover:bg-slate-300 font-medium">Reload</button>
+                                <a id="tb-open-link" href="http://localhost:6006" target="_blank" class="px-3 py-1.5 text-xs bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 font-medium">Open in New Tab</a>
+                            </div>
+                        </div>
+                        <div id="tb-iframe-container" class="w-full" style="height: calc(100% - 52px);">
+                            <div id="tb-loading" class="flex items-center justify-center h-full text-slate-400">
+                                <div class="text-center">
+                                    <svg class="w-12 h-12 mx-auto mb-3 animate-spin text-slate-300" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+                                    <p class="text-sm">Connecting to TensorBoard...</p>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -220,8 +276,45 @@
 
     <script>
         const API_BASE = 'http://localhost:3080/api';
-        const WANDB = '/wandb';
+        const USERS = ['daniel', 'woosang', 'jihoon'];
         let _nodesData = [], _jobsData = [];
+        let _currentUser = localStorage.getItem('slurm_user') || '';
+
+        // ==================== User ====================
+        function onUserChange() {
+            _currentUser = document.getElementById('current-user').value;
+            localStorage.setItem('slurm_user', _currentUser);
+            updateUserUI();
+            renderJobsPage();
+        }
+        function onMineOnlyToggle() {
+            const cb = document.getElementById('jobs-mine-only');
+            if (cb.checked && _currentUser) {
+                document.getElementById('jobs-user-filter').value = _currentUser;
+            } else {
+                document.getElementById('jobs-user-filter').value = '';
+            }
+            renderJobsPage();
+        }
+        function updateUserUI() {
+            const hdr = document.getElementById('header-user');
+            if (_currentUser) {
+                hdr.textContent = _currentUser;
+                hdr.classList.remove('hidden');
+            } else {
+                hdr.classList.add('hidden');
+            }
+            // Sync submit page user selector
+            const fUser = document.getElementById('f-user');
+            if (fUser) fUser.value = _currentUser;
+        }
+        // Init user on load
+        (function initUser() {
+            if (_currentUser) {
+                document.getElementById('current-user').value = _currentUser;
+                updateUserUI();
+            }
+        })();
 
         // ==================== API ====================
         async function fetchAPI(ep) {
@@ -234,11 +327,6 @@
                 return await r.json();
             } catch(e) { return {error:e.message}; }
         }
-        async function wandbGet(ep) {
-            try { const r = await fetch(WANDB + ep); return r.ok ? await r.json() : null; }
-            catch(e) { return null; }
-        }
-
         // ==================== Navigation ====================
         function showPage(page) {
             ['overview','submit','jobs','nodes','experiments'].forEach(p => {
@@ -251,7 +339,7 @@
             });
             const titles = {overview:'Overview', submit:'Submit Job', jobs:'Jobs', nodes:'Nodes', experiments:'Experiments'};
             document.getElementById('page-title').textContent = titles[page] || 'Dashboard';
-            if (page === 'experiments') loadProjects();
+            if (page === 'experiments') { loadTrainingRuns(); checkTbStatus(); }
         }
 
         // ==================== Helpers ====================
@@ -407,18 +495,28 @@
 
         // ==================== Render Jobs Page ====================
         function renderJobsPage() {
+            const filterUser = document.getElementById('jobs-user-filter')?.value || '';
+            const filteredJobs = filterUser ? _jobsData.filter(j => {
+                // Match by Slurm user_name or by job name prefix (user:jobname)
+                return (j.user_name === filterUser) || (j.name||'').startsWith(filterUser + ':');
+            }) : _jobsData;
+
             let h = '<table class="w-full text-sm text-left"><thead class="bg-slate-50 text-slate-500"><tr><th class="px-6 py-3 font-medium">Job ID</th><th class="px-6 py-3 font-medium">Name</th><th class="px-6 py-3 font-medium">User</th><th class="px-6 py-3 font-medium">Partition</th><th class="px-6 py-3 font-medium">Status</th><th class="px-6 py-3 font-medium">Nodes</th><th class="px-6 py-3 font-medium">GPUs</th><th class="px-6 py-3 font-medium">Time Limit</th><th class="px-6 py-3 font-medium">Action</th></tr></thead><tbody class="divide-y divide-slate-100">';
-            _jobsData.forEach(j => {
+            filteredJobs.forEach(j => {
                 const st = (j.job_state||[]).join(',');
                 const c = jobColor(st);
                 const gres = j.tres_req_str||'';
                 const gm = gres.match(/gres\/gpu=(\d+)/);
                 const gpus = gm ? gm[1] : '-';
                 const tl = j.time_limit?.number ? j.time_limit.number+'min' : 'unlimited';
+                // Parse display name: strip user prefix if present
+                const rawName = j.name || '-';
+                const displayName = rawName.includes(':') ? rawName.split(':').slice(1).join(':') : rawName;
+                const jobUser = rawName.includes(':') ? rawName.split(':')[0] : (j.user_name || '-');
                 h += `<tr class="hover:bg-slate-50">
                     <td class="px-6 py-4 font-medium text-slate-700">#${j.job_id}</td>
-                    <td class="px-6 py-4">${j.name||'-'}</td>
-                    <td class="px-6 py-4">${j.user_name||'-'}</td>
+                    <td class="px-6 py-4">${displayName}</td>
+                    <td class="px-6 py-4">${badge(jobUser, USERS.includes(jobUser) ? 'blue' : 'slate')}</td>
                     <td class="px-6 py-4">${j.partition||'-'}</td>
                     <td class="px-6 py-4">${badge(st,c)}</td>
                     <td class="px-6 py-4">${j.nodes||'(pending)'}</td>
@@ -427,7 +525,7 @@
                     <td class="px-6 py-4">${st.includes('RUNNING')||st.includes('PENDING') ? `<button onclick="cancelJob(${j.job_id})" class="text-red-500 font-medium hover:underline text-xs">Cancel</button>` : ''}</td>
                 </tr>`;
             });
-            if (!_jobsData.length) h += '<tr><td colspan="9" class="px-6 py-8 text-center text-slate-400">No jobs</td></tr>';
+            if (!filteredJobs.length) h += '<tr><td colspan="9" class="px-6 py-8 text-center text-slate-400">No jobs' + (filterUser ? ` for ${filterUser}` : '') + '</td></tr>';
             h += '</tbody></table>';
             document.getElementById('jobs-table').innerHTML = h;
         }
@@ -436,10 +534,17 @@
         async function submitJob() {
             const btn = document.getElementById('btn-submit');
             const result = document.getElementById('submit-result');
+            const user = document.getElementById('f-user').value;
+            if (!user) {
+                result.textContent = 'Please select a user first.';
+                result.className = 'text-sm text-red-500';
+                return;
+            }
             btn.disabled = true; result.textContent = 'Submitting...'; result.className = 'text-sm text-slate-500';
 
+            const jobName = document.getElementById('f-name').value;
             const data = {
-                job_name: document.getElementById('f-name').value,
+                job_name: `${user}:${jobName}`,
                 partition: document.getElementById('f-partition').value,
                 nodes: document.getElementById('f-nodes').value,
                 cpus: document.getElementById('f-cpus').value,
@@ -460,160 +565,249 @@
             setTimeout(refreshAll, 500);
         }
 
-        // ==================== W&B / Experiments ====================
-        let _projects = [], _selectedProject = null, _runsCache = [], _charts = {};
-        let _wandbEntity = '', _wandbBaseUrl = 'https://wandb.ai';
+        // ==================== Experiments (TensorBoard) ====================
+        let _allRuns = [], _selectedProject = null, _runsCache = [], _charts = {};
+        let _expView = 'runs', _tbLoaded = false;
+        const TB_DIRECT_URL = `http://${window.location.hostname}:6006`;
 
-        async function loadProjects() {
-            const data = await wandbGet('/projects');
-            if (!data?.projects) {
-                document.getElementById('exp-tabs').innerHTML = '<p class="text-slate-400 text-sm">W&B not available. Set WANDB_API_KEY and WANDB_ENTITY env vars on the server.</p>';
-                return;
+        function setExpView(view) {
+            _expView = view;
+            document.getElementById('exp-runs-view').classList.toggle('hidden', view !== 'runs');
+            document.getElementById('exp-tb-view').classList.toggle('hidden', view !== 'tensorboard');
+            document.getElementById('exp-view-runs').className = `px-4 py-2 rounded-lg text-sm font-medium ${view === 'runs' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`;
+            document.getElementById('exp-view-tb').className = `px-4 py-2 rounded-lg text-sm font-medium ${view === 'tensorboard' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`;
+
+            if (view === 'tensorboard' && !_tbLoaded) {
+                loadTensorBoardIframe();
             }
-            _projects = data.projects;
-            _wandbEntity = data.entity || '';
-            _wandbBaseUrl = data.base_url || 'https://wandb.ai';
-            const wbLink = document.getElementById('wandb-link');
-            if (wbLink && _wandbEntity) wbLink.href = `${_wandbBaseUrl}/${_wandbEntity}`;
-
-            renderProjectTabs();
-            if (!_selectedProject && _projects.length) selectProject(_projects[0].name);
-            else if (_selectedProject) loadWandbRuns(_selectedProject);
         }
 
-        function renderProjectTabs() {
+        async function checkTbStatus() {
+            const data = await fetchAPI('/tb-status');
+            const el = document.getElementById('tb-status-badge');
+            if (data?.status === 'running') {
+                el.innerHTML = '<span class="inline-flex items-center gap-1"><span class="w-2 h-2 bg-green-400 rounded-full"></span> TensorBoard running</span>';
+            } else {
+                el.innerHTML = '<span class="inline-flex items-center gap-1"><span class="w-2 h-2 bg-red-400 rounded-full"></span> TensorBoard offline</span>';
+            }
+            return data?.status === 'running';
+        }
+
+        async function loadTensorBoardIframe() {
+            const container = document.getElementById('tb-iframe-container');
+            const loading = document.getElementById('tb-loading');
+            const isRunning = await checkTbStatus();
+
+            if (!isRunning) {
+                loading.innerHTML = `<div class="text-center">
+                    <svg class="w-12 h-12 mx-auto mb-3 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"></path></svg>
+                    <p class="text-sm font-medium mb-2">TensorBoard is not running</p>
+                    <p class="text-xs text-slate-400">Start the tensorboard container:</p>
+                    <code class="text-xs bg-slate-100 px-3 py-1 rounded mt-2 inline-block">docker compose up tensorboard -d</code>
+                </div>`;
+                return;
+            }
+
+            // Create iframe pointing directly to TensorBoard
+            const iframe = document.createElement('iframe');
+            iframe.src = TB_DIRECT_URL;
+            iframe.className = 'w-full h-full border-0';
+            iframe.allow = 'fullscreen';
+
+            // Update open-in-new-tab link
+            document.getElementById('tb-open-link').href = TB_DIRECT_URL;
+
+            // Replace loading with iframe
+            if (loading) loading.remove();
+            container.appendChild(iframe);
+            _tbLoaded = true;
+        }
+
+        function reloadTensorBoard() {
+            const container = document.getElementById('tb-iframe-container');
+            const iframe = container.querySelector('iframe');
+            if (iframe) {
+                iframe.src = iframe.src;
+            } else {
+                _tbLoaded = false;
+                container.innerHTML = `<div id="tb-loading" class="flex items-center justify-center h-full text-slate-400">
+                    <div class="text-center">
+                        <svg class="w-12 h-12 mx-auto mb-3 animate-spin text-slate-300" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+                        <p class="text-sm">Connecting to TensorBoard...</p>
+                    </div>
+                </div>`;
+                loadTensorBoardIframe();
+            }
+        }
+
+        async function loadTrainingRuns() {
+            document.getElementById('exp-scan-status').textContent = 'Scanning /data for training runs...';
+            const data = await fetchAPI('/runs');
+            _allRuns = data?.runs || [];
+            document.getElementById('exp-scan-status').textContent = `${_allRuns.length} run(s) found`;
+
+            // Extract unique projects
+            const projects = [...new Set(_allRuns.map(r => r.project))].sort();
+            renderProjectTabs(projects);
+
+            if (!_selectedProject && projects.length) selectProject(projects[0]);
+            else if (_selectedProject) renderRunList(_selectedProject);
+        }
+
+        function renderProjectTabs(projects) {
             let h = '';
-            _projects.forEach(p => {
-                const active = _selectedProject === p.name;
-                h += `<button onclick="selectProject('${p.name}')" class="px-4 py-2 rounded-lg text-sm font-medium transition-all ${active ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}">${p.name} <span class="text-xs opacity-70">(${p.run_count})</span></button>`;
+            (projects || []).forEach(p => {
+                const count = _allRuns.filter(r => r.project === p).length;
+                const active = _selectedProject === p;
+                h += `<button onclick="selectProject('${p}')" class="px-4 py-2 rounded-lg text-sm font-medium transition-all ${active ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}">${p} <span class="text-xs opacity-70">(${count})</span></button>`;
             });
-            if (!_projects.length) h = '<p class="text-slate-400 text-sm">No projects yet. Run a training script with W&B tracking.</p>';
+            if (!projects || !projects.length) h = '<p class="text-slate-400 text-sm">No training runs found. Run a training job with TensorBoard logging.</p>';
             document.getElementById('exp-tabs').innerHTML = h;
         }
 
-        async function selectProject(name) {
+        function selectProject(name) {
             _selectedProject = name;
-            renderProjectTabs();
-            // Update "Open W&B" link to project page
-            const wbLink = document.getElementById('wandb-link');
-            if (wbLink && _wandbEntity) wbLink.href = `${_wandbBaseUrl}/${_wandbEntity}/${name}`;
-            await loadWandbRuns(name);
+            const projects = [...new Set(_allRuns.map(r => r.project))].sort();
+            renderProjectTabs(projects);
+            renderRunList(name);
         }
 
-        async function loadWandbRuns(project) {
+        function renderRunList(project) {
             document.getElementById('exp-runs-title').textContent = `Runs - ${project}`;
-            const data = await wandbGet(`/runs?project=${encodeURIComponent(project)}`);
-            _runsCache = data?.runs || [];
+            _runsCache = _allRuns.filter(r => r.project === project);
 
             let h = '<table class="w-full text-sm text-left"><thead class="bg-slate-50 text-slate-500"><tr>';
             h += '<th class="px-6 py-3 font-medium">Run</th>';
             h += '<th class="px-6 py-3 font-medium">Status</th>';
-            h += '<th class="px-6 py-3 font-medium">Model</th>';
-            h += '<th class="px-6 py-3 font-medium">LR</th>';
-            h += '<th class="px-6 py-3 font-medium">Batch</th>';
-            h += '<th class="px-6 py-3 font-medium">GPU</th>';
-            h += '<th class="px-6 py-3 font-medium">Val Acc</th>';
-            h += '<th class="px-6 py-3 font-medium">Train Loss</th>';
+            h += '<th class="px-6 py-3 font-medium">Started</th>';
+            h += '<th class="px-6 py-3 font-medium">Metrics</th>';
             h += '<th class="px-6 py-3 font-medium">Details</th>';
             h += '</tr></thead><tbody class="divide-y divide-slate-100">';
 
             _runsCache.forEach(r => {
-                const c = r.config || {};
-                const s = r.summary || {};
-                const st = (r.state || 'unknown').toLowerCase();
-                const stColor = st === 'finished' ? 'green' : st === 'running' ? 'blue' : (st === 'failed' || st === 'crashed') ? 'red' : 'slate';
-                const valAcc = s.best_val_acc ?? s.val_acc;
+                const st = r.state || 'unknown';
+                const stColor = st === 'finished' ? 'green' : st === 'running' ? 'blue' : 'slate';
+                // Show top metric values
+                const summaryParts = Object.entries(r.summary || {}).slice(0, 4).map(([k,v]) => {
+                    const val = typeof v === 'number' ? (Math.abs(v) < 0.01 ? v.toExponential(2) : v.toFixed(4)) : v;
+                    return `<span class="text-xs text-slate-500">${k}:</span> <span class="font-mono text-xs">${val}</span>`;
+                });
 
                 h += `<tr class="hover:bg-slate-50">
                     <td class="px-6 py-4 font-medium text-slate-700">${r.display_name}</td>
                     <td class="px-6 py-4">${badge(st.toUpperCase(), stColor)}</td>
-                    <td class="px-6 py-4">${c.model||'-'}</td>
-                    <td class="px-6 py-4 font-mono text-xs">${c.learning_rate||c.lr||'-'}</td>
-                    <td class="px-6 py-4">${c.batch_size||'-'}</td>
-                    <td class="px-6 py-4">${c.gpu_type||'-'}</td>
-                    <td class="px-6 py-4 font-bold ${(valAcc||0)>0.9?'text-green-600':'text-slate-700'}">${valAcc != null ? (valAcc*100).toFixed(1)+'%' : '-'}</td>
-                    <td class="px-6 py-4">${s.final_train_loss ?? s.train_loss ?? '-'}</td>
-                    <td class="px-6 py-4"><button onclick="showRunDetail('${r.name}')" class="text-blue-600 hover:underline text-xs font-medium">View</button></td>
+                    <td class="px-6 py-4 text-xs text-slate-500">${r.started_at || '-'}</td>
+                    <td class="px-6 py-4">${summaryParts.join(' &nbsp; ') || '-'}</td>
+                    <td class="px-6 py-4"><button onclick="showRunDetail('${r.id}','${encodeURIComponent(r.tb_dir)}')" class="text-blue-600 hover:underline text-xs font-medium">View</button></td>
                 </tr>`;
             });
-            if (!_runsCache.length) h += '<tr><td colspan="9" class="px-6 py-8 text-center text-slate-400">No runs yet</td></tr>';
+            if (!_runsCache.length) h += '<tr><td colspan="5" class="px-6 py-8 text-center text-slate-400">No runs in this project</td></tr>';
             h += '</tbody></table>';
             document.getElementById('exp-runs-table').innerHTML = h;
             document.getElementById('exp-run-detail').classList.add('hidden');
         }
 
-        async function showRunDetail(runName) {
-            const run = _runsCache.find(r => r.name === runName);
+        async function showRunDetail(runId, tbDirEncoded) {
+            const run = _runsCache.find(r => r.id === runId);
             if (!run) return;
 
-            // Params
-            let ph = '';
-            Object.entries(run.config || {}).forEach(([k, v]) => {
-                ph += `<div class="flex justify-between text-sm"><span class="text-slate-500">${k}</span><span class="font-mono font-medium">${v}</span></div>`;
-            });
-            document.getElementById('run-params').innerHTML = ph || '<p class="text-slate-400 text-sm">No parameters</p>';
-
-            // Metrics summary
+            // Show final metrics as cards
             let mh = '';
             Object.entries(run.summary || {}).forEach(([k, v]) => {
-                const val = typeof v === 'number' ? v.toFixed(4) : v;
-                mh += `<div class="flex justify-between text-sm"><span class="text-slate-500">${k}</span><span class="font-mono font-medium">${val}</span></div>`;
+                const val = typeof v === 'number' ? (Math.abs(v) < 0.01 ? v.toExponential(3) : v.toFixed(4)) : v;
+                mh += `<div class="border border-slate-200 rounded-xl p-4">
+                    <div class="text-xs text-slate-400 font-medium mb-1">${k}</div>
+                    <div class="text-lg font-bold font-mono text-slate-700">${val}</div>
+                </div>`;
             });
-            document.getElementById('run-metrics').innerHTML = mh || '<p class="text-slate-400 text-sm">No metrics</p>';
+            document.getElementById('run-metrics').innerHTML = mh || '<p class="text-slate-400 text-sm col-span-4">No metrics yet</p>';
 
             document.getElementById('exp-run-detail').classList.remove('hidden');
-            await loadMetricCharts(runName);
+            await loadMetricCharts(decodeURIComponent(tbDirEncoded));
         }
 
-        async function loadMetricCharts(runName) {
-            if (_charts.loss) _charts.loss.destroy();
-            if (_charts.acc) _charts.acc.destroy();
+        const CHART_COLORS = ['#3b82f6','#f97316','#10b981','#8b5cf6','#ef4444','#06b6d4','#f59e0b','#ec4899','#14b8a6','#6366f1'];
 
-            const data = await wandbGet(`/history?project=${encodeURIComponent(_selectedProject)}&run=${encodeURIComponent(runName)}`);
+        async function loadMetricCharts(tbDir) {
+            // Destroy existing charts
+            Object.values(_charts).forEach(c => c.destroy());
+            _charts = {};
+
+            const container = document.getElementById('charts-container');
+            container.innerHTML = '<p class="text-slate-400 text-sm col-span-2">Loading TensorBoard data...</p>';
+
+            const data = await fetchAPI(`/run-history?tb_dir=${encodeURIComponent(tbDir)}`);
             const history = data?.history || [];
+            if (!history.length) {
+                container.innerHTML = '<p class="text-slate-400 text-sm col-span-2">No history data' + (data?.error ? ': ' + data.error : '') + '</p>';
+                return;
+            }
 
-            const steps = [], trainLoss = [], valLoss = [], trainAcc = [], valAcc = [];
+            // Collect all metric keys (exclude internal _ keys)
+            const allKeys = new Set();
             history.forEach(row => {
-                const step = row._step !== undefined ? row._step : steps.length;
-                if (row.train_loss !== undefined || row.val_loss !== undefined ||
-                    row.train_acc !== undefined || row.val_acc !== undefined) {
-                    steps.push(step);
-                    trainLoss.push(row.train_loss ?? null);
-                    valLoss.push(row.val_loss ?? null);
-                    trainAcc.push(row.train_acc ?? null);
-                    valAcc.push(row.val_acc ?? null);
-                }
+                Object.keys(row).forEach(k => { if (!k.startsWith('_')) allKeys.add(k); });
             });
 
-            const chartOpts = {
-                responsive: true,
-                plugins: { legend: { position: 'top' } },
-                scales: { x: { title: { display: true, text: 'Step' } } },
-                spanGaps: true,
-            };
-
-            _charts.loss = new Chart(document.getElementById('chart-loss'), {
-                type: 'line',
-                data: {
-                    labels: steps,
-                    datasets: [
-                        { label: 'Train Loss', data: trainLoss, borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.1)', fill: true, tension: 0.3 },
-                        { label: 'Val Loss', data: valLoss, borderColor: '#f97316', backgroundColor: 'rgba(249,115,22,0.1)', fill: true, tension: 0.3 },
-                    ]
-                },
-                options: { ...chartOpts, plugins: { ...chartOpts.plugins, title: { display: true, text: 'Loss' } } }
+            // Group metrics by prefix (e.g. train/loss, val/acc → train, val)
+            const groups = {};
+            allKeys.forEach(k => {
+                const prefix = k.includes('/') ? k.split('/')[0] : k;
+                if (!groups[prefix]) groups[prefix] = [];
+                groups[prefix].push(k);
             });
 
-            _charts.acc = new Chart(document.getElementById('chart-acc'), {
-                type: 'line',
-                data: {
-                    labels: steps,
-                    datasets: [
-                        { label: 'Train Acc', data: trainAcc, borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.1)', fill: true, tension: 0.3 },
-                        { label: 'Val Acc', data: valAcc, borderColor: '#8b5cf6', backgroundColor: 'rgba(139,92,246,0.1)', fill: true, tension: 0.3 },
-                    ]
-                },
-                options: { ...chartOpts, plugins: { ...chartOpts.plugins, title: { display: true, text: 'Accuracy' } } }
+            container.innerHTML = '';
+            const groupNames = Object.keys(groups).sort();
+
+            groupNames.forEach(group => {
+                const keys = groups[group].sort();
+                const wrapper = document.createElement('div');
+                const canvas = document.createElement('canvas');
+                canvas.id = `chart-${group.replace(/[^a-zA-Z0-9]/g,'_')}`;
+                canvas.height = 200;
+                wrapper.appendChild(canvas);
+                container.appendChild(wrapper);
+
+                const datasets = keys.map((key, i) => {
+                    const points = [];
+                    history.forEach(row => {
+                        if (row[key] !== undefined) {
+                            points.push({ x: row._step ?? 0, y: row[key] });
+                        }
+                    });
+                    const color = CHART_COLORS[i % CHART_COLORS.length];
+                    const label = key.includes('/') ? key.split('/').slice(1).join('/') : key;
+                    return {
+                        label,
+                        data: points,
+                        borderColor: color,
+                        backgroundColor: color + '18',
+                        fill: false,
+                        tension: 0.3,
+                        pointRadius: 2,
+                        borderWidth: 2,
+                    };
+                });
+
+                _charts[group] = new Chart(canvas, {
+                    type: 'line',
+                    data: { datasets },
+                    options: {
+                        responsive: true,
+                        interaction: { mode: 'index', intersect: false },
+                        plugins: {
+                            legend: { position: 'top', labels: { boxWidth: 12, font: { size: 11 } } },
+                            title: { display: true, text: group, font: { size: 14, weight: 'bold' } },
+                            tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y?.toFixed(4)}` } }
+                        },
+                        scales: {
+                            x: { type: 'linear', title: { display: true, text: 'Step' } },
+                            y: { title: { display: true, text: 'Value' } }
+                        },
+                        spanGaps: true,
+                    }
+                });
             });
         }
 
@@ -626,6 +820,10 @@
             renderNodesPage();
             renderJobsPage();
             renderPartitions();
+            // Experiments 탭이 활성화되어 있으면 갱신
+            if (!document.getElementById('page-experiments')?.classList.contains('hidden')) {
+                loadTrainingRuns();
+            }
             document.getElementById('last-update').textContent = 'Updated: ' + new Date().toLocaleTimeString();
         }
 
