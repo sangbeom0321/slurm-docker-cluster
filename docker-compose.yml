@@ -70,6 +70,8 @@ services:
       - slurm_jobdir:/data:z
       - var_log_slurm:/var/log/slurm:z
       - ${SSH_AUTHORIZED_KEYS:-/dev/null}:/tmp/authorized_keys_host:ro,z
+      - ${WORKSPACE_PATH:-/tmp/slurm-workspace}:/workspace
+      - ${NUPLAN_DATASET_PATH:-/tmp/slurm-nuplan}:/data/nuplan:ro
     ports:
       - "${SSH_PORT:-3022}:22"
     expose:
@@ -124,6 +126,8 @@ services:
       - etc_slurm:/etc/slurm
       - slurm_jobdir:/data
       - var_log_slurm:/var/log/slurm
+      - ${WORKSPACE_PATH:-/tmp/slurm-workspace}:/workspace:ro
+      - ${NUPLAN_DATASET_PATH:-/tmp/slurm-nuplan}:/data/nuplan:ro
     expose:
       - "6818"
     depends_on:
@@ -155,6 +159,8 @@ services:
       - etc_slurm:/etc/slurm
       - slurm_jobdir:/data
       - var_log_slurm:/var/log/slurm
+      - ${WORKSPACE_PATH:-/tmp/slurm-workspace}:/workspace:ro
+      - ${NUPLAN_DATASET_PATH:-/tmp/slurm-nuplan}:/data/nuplan:ro
     expose:
       - "6818"
     depends_on:
