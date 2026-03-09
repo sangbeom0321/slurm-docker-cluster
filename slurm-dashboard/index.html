@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AILAB Job Scheduler Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <style>
+        .bg-brand-gradient { background: linear-gradient(135deg, #2b3990 0%, #4a77d4 100%); }
+        .text-brand { color: #2b3990; }
+        .sidebar-link.active { background: #eff6ff; color: #1d4ed8; }
+        /* progress bar animation */
+        @keyframes pulse-bar { 0%,100%{opacity:1} 50%{opacity:.7} }
+        .bar-animate { animation: pulse-bar 2s ease-in-out infinite; }
+    </style>
+</head>
+<body class="bg-blue-50/30 flex h-screen font-sans text-slate-800 overflow-hidden">
+
+    <!-- Sidebar -->
+    <aside class="w-64 bg-white border-r border-slate-200 flex flex-col shadow-sm shrink-0">
+        <div class="h-20 flex items-center px-6 border-b border-slate-100">
+            <img src="logo-dark.png" alt="AILAB" class="h-10">
+        </div>
+        <nav class="flex-1 p-4 space-y-1 overflow-y-auto text-sm font-medium">
+            <a href="#" onclick="showPage('overview')" id="nav-overview" class="sidebar-link active flex items-center gap-3 px-3 py-2.5 rounded-lg">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path></svg>
+                Overview
+            </a>
+            <a href="#" onclick="showPage('submit')" id="nav-submit" class="sidebar-link flex items-center gap-3 px-3 py-2.5 text-slate-600 hover:bg-slate-50 rounded-lg">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                Submit Job
+            </a>
+            <a href="#" onclick="showPage('jobs')" id="nav-jobs" class="sidebar-link flex items-center gap-3 px-3 py-2.5 text-slate-600 hover:bg-slate-50 rounded-lg">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg>
+                Jobs
+            </a>
+            <a href="#" onclick="showPage('nodes')" id="nav-nodes" class="sidebar-link flex items-center gap-3 px-3 py-2.5 text-slate-600 hover:bg-slate-50 rounded-lg">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2"></path></svg>
+                Nodes
+            </a>
+            <div class="mt-4 mb-1 px-3 text-xs text-slate-400 font-semibold uppercase tracking-wider">MLOps</div>
+            <a href="#" onclick="showPage('experiments')" id="nav-experiments" class="sidebar-link flex items-center gap-3 px-3 py-2.5 text-slate-600 hover:bg-slate-50 rounded-lg">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"></path></svg>
+                Experiments
+            </a>
+        </nav>
+        <div class="p-4 border-t border-slate-100 text-xs text-slate-400">
+            SLURM 25.11.2 | Auto-refresh 10s
+        </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="flex-1 flex flex-col h-screen overflow-hidden">
+        <header class="h-20 bg-white border-b border-slate-200 flex items-center justify-between px-8 shrink-0">
+            <h1 class="text-xl font-bold text-slate-800" id="page-title">Overview</h1>
+            <div class="flex items-center gap-4">
+                <span class="text-xs text-slate-400" id="last-update"></span>
+                <button onclick="refreshAll()" class="px-4 py-2 text-sm bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 font-medium">Refresh</button>
+            </div>
+        </header>
+
+        <div class="flex-1 overflow-y-auto p-8 space-y-6">
+
+            <!-- ==================== OVERVIEW PAGE ==================== -->
+            <div id="page-overview">
+                <!-- Summary Cards -->
+                <div class="grid grid-cols-4 gap-6 mb-6" id="summary-cards">
+                    <div class="bg-brand-gradient rounded-2xl p-6 text-white shadow-lg">
+                        <p class="text-blue-100 text-sm font-medium mb-1">Total Nodes</p>
+                        <h2 class="text-4xl font-bold mb-2" id="s-total-nodes">-</h2>
+                        <p class="text-xs text-blue-200" id="s-node-detail">Loading...</p>
+                    </div>
+                    <div class="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
+                        <p class="text-slate-500 text-sm font-medium mb-1">Running Jobs</p>
+                        <h2 class="text-4xl font-bold text-brand mb-2" id="s-running">-</h2>
+                        <div class="w-full bg-slate-100 h-1.5 rounded-full"><div class="bg-blue-500 h-1.5 rounded-full" id="s-running-bar" style="width:0%"></div></div>
+                    </div>
+                    <div class="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
+                        <p class="text-slate-500 text-sm font-medium mb-1">Pending Jobs</p>
+                        <h2 class="text-4xl font-bold text-slate-700 mb-2" id="s-pending">-</h2>
+                        <div class="w-full bg-slate-100 h-1.5 rounded-full"><div class="bg-indigo-400 h-1.5 rounded-full" id="s-pending-bar" style="width:0%"></div></div>
+                    </div>
+                    <div class="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
+                        <p class="text-slate-500 text-sm font-medium mb-1">CPUs Used</p>
+                        <h2 class="text-4xl font-bold text-slate-700 mb-2" id="s-cpus">-</h2>
+                        <div class="w-full bg-slate-100 h-1.5 rounded-full"><div class="bg-emerald-500 h-1.5 rounded-full" id="s-cpu-bar" style="width:0%"></div></div>
+                    </div>
+                </div>
+
+                <!-- Resource + Cluster Nodes -->
+                <div class="grid grid-cols-3 gap-6 mb-6">
+                    <div class="col-span-2 bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
+                        <h3 class="text-lg font-bold text-slate-800 mb-4">Cluster Nodes</h3>
+                        <div class="grid grid-cols-3 gap-3" id="overview-nodes"></div>
+                    </div>
+                    <div class="col-span-1 bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
+                        <h3 class="text-lg font-bold text-slate-800 mb-4">Partitions</h3>
+                        <div class="space-y-3" id="overview-partitions"></div>
+                    </div>
+                </div>
+
+                <!-- Recent Jobs -->
+                <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div class="p-6 border-b border-slate-100 flex justify-between items-center">
+                        <h3 class="text-lg font-bold text-slate-800">Recent Job Activity</h3>
+                    </div>
+                    <div id="overview-jobs"></div>
+                </div>
+            </div>
+
+            <!-- ==================== SUBMIT PAGE ==================== -->
+            <div id="page-submit" class="hidden">
+                <div class="bg-white rounded-2xl p-8 border border-slate-200 shadow-sm max-w-3xl">
+                    <h3 class="text-lg font-bold text-slate-800 mb-6">Submit New Job</h3>
+                    <div class="grid grid-cols-2 gap-5 mb-5">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-600 mb-1">Job Name</label>
+                            <input type="text" id="f-name" value="my_job" class="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-600 mb-1">Partition</label>
+                            <select id="f-partition" class="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white">
+                                <option value="">(default)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-600 mb-1">Nodes</label>
+                            <input type="number" id="f-nodes" value="1" min="1" class="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-600 mb-1">CPUs per Task</label>
+                            <input type="number" id="f-cpus" min="1" placeholder="auto" class="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-600 mb-1">Memory</label>
+                            <input type="text" id="f-mem" placeholder="e.g. 16G" class="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-600 mb-1">GPUs</label>
+                            <input type="text" id="f-gpus" placeholder="e.g. 1 or 3090:2" class="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-600 mb-1">Time Limit</label>
+                            <input type="text" id="f-time" placeholder="e.g. 1:00:00" class="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
+                        </div>
+                    </div>
+                    <div class="mb-6">
+                        <label class="block text-sm font-medium text-slate-600 mb-1">Command</label>
+                        <textarea id="f-command" rows="3" placeholder="hostname && nvidia-smi" class="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-y">hostname</textarea>
+                    </div>
+                    <div class="flex items-center gap-4">
+                        <button id="btn-submit" onclick="submitJob()" class="px-6 py-2.5 bg-brand-gradient text-white font-bold rounded-lg hover:opacity-90 shadow-md">Submit Job</button>
+                        <span id="submit-result" class="text-sm"></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ==================== JOBS PAGE ==================== -->
+            <div id="page-jobs" class="hidden">
+                <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div class="p-6 border-b border-slate-100">
+                        <h3 class="text-lg font-bold text-slate-800">All Jobs</h3>
+                    </div>
+                    <div id="jobs-table"></div>
+                </div>
+            </div>
+
+            <!-- ==================== NODES PAGE ==================== -->
+            <div id="page-nodes" class="hidden">
+                <div class="grid grid-cols-3 gap-5" id="nodes-grid"></div>
+            </div>
+
+            <!-- ==================== EXPERIMENTS PAGE ==================== -->
+            <div id="page-experiments" class="hidden">
+                <!-- Experiment selector -->
+                <div class="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm mb-6">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-lg font-bold text-slate-800">Projects / Experiments</h3>
+                        <a id="wandb-link" href="https://wandb.ai" target="_blank" class="text-sm text-blue-600 hover:underline">Open W&B</a>
+                    </div>
+                    <div class="flex flex-wrap gap-2" id="exp-tabs"></div>
+                </div>
+
+                <!-- Run list -->
+                <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden mb-6">
+                    <div class="p-6 border-b border-slate-100">
+                        <h3 class="text-lg font-bold text-slate-800" id="exp-runs-title">Runs</h3>
+                    </div>
+                    <div id="exp-runs-table"></div>
+                </div>
+
+                <!-- Run detail -->
+                <div id="exp-run-detail" class="hidden">
+                    <div class="grid grid-cols-2 gap-6">
+                        <!-- Parameters -->
+                        <div class="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
+                            <h3 class="text-lg font-bold text-slate-800 mb-4">Parameters</h3>
+                            <div id="run-params" class="space-y-2"></div>
+                        </div>
+                        <!-- Metrics summary -->
+                        <div class="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
+                            <h3 class="text-lg font-bold text-slate-800 mb-4">Metrics</h3>
+                            <div id="run-metrics" class="space-y-2"></div>
+                        </div>
+                    </div>
+                    <!-- Metric charts -->
+                    <div class="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm mt-6">
+                        <h3 class="text-lg font-bold text-slate-800 mb-4">Training Curves</h3>
+                        <div class="grid grid-cols-2 gap-6">
+                            <canvas id="chart-loss" height="200"></canvas>
+                            <canvas id="chart-acc" height="200"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <script>
+        const API_BASE = 'http://localhost:3080/api';
+        const WANDB = '/wandb';
+        let _nodesData = [], _jobsData = [];
+
+        // ==================== API ====================
+        async function fetchAPI(ep) {
+            try { const r = await fetch(API_BASE + ep); return r.ok ? await r.json() : null; }
+            catch(e) { return null; }
+        }
+        async function postAPI(ep, data) {
+            try {
+                const r = await fetch(API_BASE + ep, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) });
+                return await r.json();
+            } catch(e) { return {error:e.message}; }
+        }
+        async function wandbGet(ep) {
+            try { const r = await fetch(WANDB + ep); return r.ok ? await r.json() : null; }
+            catch(e) { return null; }
+        }
+
+        // ==================== Navigation ====================
+        function showPage(page) {
+            ['overview','submit','jobs','nodes','experiments'].forEach(p => {
+                document.getElementById('page-'+p).classList.toggle('hidden', p !== page);
+                const nav = document.getElementById('nav-'+p);
+                if (nav) {
+                    nav.classList.toggle('active', p === page);
+                    nav.classList.toggle('text-slate-600', p !== page);
+                }
+            });
+            const titles = {overview:'Overview', submit:'Submit Job', jobs:'Jobs', nodes:'Nodes', experiments:'Experiments'};
+            document.getElementById('page-title').textContent = titles[page] || 'Dashboard';
+            if (page === 'experiments') loadProjects();
+        }
+
+        // ==================== Helpers ====================
+        function fmem(mb) { return mb >= 1024 ? (mb/1024).toFixed(1)+'GB' : mb+'MB'; }
+        function pct(u,t) { return t ? Math.round(u/t*100) : 0; }
+        function stateColor(s) {
+            s = s.toLowerCase();
+            if (s.includes('idle')) return 'green';
+            if (s.includes('mixed')) return 'yellow';
+            if (s.includes('alloc')) return 'orange';
+            if (s.includes('drain')) return 'red';
+            if (s.includes('down')) return 'red';
+            return 'slate';
+        }
+        function jobColor(s) {
+            s = s.toLowerCase();
+            if (s.includes('running')) return 'blue';
+            if (s.includes('pending')) return 'yellow';
+            if (s.includes('completed')) return 'green';
+            if (s.includes('failed') || s.includes('cancel')) return 'red';
+            return 'slate';
+        }
+        function badge(text, color) {
+            const map = {
+                green:'bg-green-100 text-green-700', blue:'bg-blue-100 text-blue-700',
+                yellow:'bg-yellow-100 text-yellow-700', orange:'bg-orange-100 text-orange-700',
+                red:'bg-red-100 text-red-700', slate:'bg-slate-100 text-slate-600'
+            };
+            return `<span class="px-2.5 py-1 ${map[color]||map.slate} rounded-full text-xs font-bold">${text}</span>`;
+        }
+
+        // ==================== Render Overview ====================
+        function renderOverview() {
+            const nodes = _nodesData;
+            const jobs = _jobsData;
+            let totalCPU=0, usedCPU=0, idle=0, alloc=0, down=0;
+            nodes.forEach(n => {
+                totalCPU += n.cpus||0; usedCPU += n.alloc_cpus||0;
+                const s = (n.state||[]).join('+').toLowerCase();
+                if (s.includes('idle')) idle++;
+                else if (s.includes('alloc')||s.includes('mixed')) alloc++;
+                else down++;
+            });
+            const running = jobs.filter(j => (j.job_state||[]).join(',').includes('RUNNING')).length;
+            const pending = jobs.filter(j => (j.job_state||[]).join(',').includes('PENDING')).length;
+            const total = running + pending || 1;
+
+            document.getElementById('s-total-nodes').textContent = nodes.length;
+            document.getElementById('s-node-detail').textContent = `${idle} Idle / ${alloc} Busy / ${down} Down`;
+            document.getElementById('s-running').textContent = running;
+            document.getElementById('s-running-bar').style.width = pct(running,total)+'%';
+            document.getElementById('s-pending').textContent = pending;
+            document.getElementById('s-pending-bar').style.width = pct(pending,total)+'%';
+            document.getElementById('s-cpus').textContent = usedCPU+'/'+totalCPU;
+            document.getElementById('s-cpu-bar').style.width = pct(usedCPU,totalCPU)+'%';
+
+            // Mini node cards
+            let nh = '';
+            nodes.forEach(n => {
+                const s = (n.state||[]).join('+');
+                const c = stateColor(s);
+                const cpuP = pct(n.alloc_cpus||0, n.cpus||1);
+                nh += `<div class="border border-slate-200 rounded-xl p-4">
+                    <div class="flex justify-between items-center mb-2">
+                        <span class="font-semibold text-sm">${n.name||n.hostname}</span>
+                        ${badge(s, c)}
+                    </div>
+                    <div class="text-xs text-slate-500 mb-1">CPU ${n.alloc_cpus||0}/${n.cpus||0}</div>
+                    <div class="w-full bg-slate-100 h-1.5 rounded-full"><div class="bg-blue-500 h-1.5 rounded-full" style="width:${cpuP}%"></div></div>
+                    <div class="text-xs text-slate-500 mt-2">Mem ${fmem(n.alloc_memory||0)}/${fmem(n.real_memory||0)}</div>
+                    ${n.gres ? `<div class="text-xs text-slate-400 mt-1">GPU: ${n.gres}</div>` : ''}
+                </div>`;
+            });
+            document.getElementById('overview-nodes').innerHTML = nh || '<p class="text-slate-400 col-span-3 text-center py-8">No nodes</p>';
+
+            // Jobs table
+            let jh = '<table class="w-full text-sm text-left"><thead class="bg-slate-50 text-slate-500"><tr><th class="px-6 py-3 font-medium">Job ID</th><th class="px-6 py-3 font-medium">Name</th><th class="px-6 py-3 font-medium">User</th><th class="px-6 py-3 font-medium">Status</th><th class="px-6 py-3 font-medium">Node</th><th class="px-6 py-3 font-medium">Action</th></tr></thead><tbody class="divide-y divide-slate-100">';
+            (jobs.length ? jobs.slice(0,10) : []).forEach(j => {
+                const st = (j.job_state||[]).join(',');
+                const c = jobColor(st);
+                jh += `<tr class="hover:bg-slate-50">
+                    <td class="px-6 py-4 font-medium text-slate-700">#${j.job_id}</td>
+                    <td class="px-6 py-4">${j.name||'-'}</td>
+                    <td class="px-6 py-4">${j.user_name||'-'}</td>
+                    <td class="px-6 py-4">${badge(st,c)}</td>
+                    <td class="px-6 py-4 text-slate-500">${j.nodes||'(pending)'}</td>
+                    <td class="px-6 py-4">${st.includes('RUNNING')||st.includes('PENDING') ? `<button onclick="cancelJob(${j.job_id})" class="text-red-500 font-medium hover:underline text-xs">Cancel</button>` : ''}</td>
+                </tr>`;
+            });
+            if (!jobs.length) jh += '<tr><td colspan="6" class="px-6 py-8 text-center text-slate-400">No jobs</td></tr>';
+            jh += '</tbody></table>';
+            document.getElementById('overview-jobs').innerHTML = jh;
+        }
+
+        // ==================== Render Partitions ====================
+        async function renderPartitions() {
+            const data = await fetchAPI('/partitions');
+            if (!data?.partitions) return;
+            let h = '';
+            const sel = document.getElementById('f-partition');
+            // Only populate select once
+            if (sel.options.length <= 1) {
+                data.partitions.forEach(p => {
+                    const o = document.createElement('option');
+                    o.value = p.name; o.textContent = p.name;
+                    sel.appendChild(o);
+                });
+            }
+            data.partitions.forEach(p => {
+                const idle = p.node_sets ? '': '';
+                h += `<div class="flex items-center justify-between">
+                    <div>
+                        <span class="text-sm font-medium">${p.name}</span>
+                        ${p.is_default ? '<span class="text-xs text-blue-500 ml-1">(default)</span>' : ''}
+                    </div>
+                    ${badge(p.state?.join(',')||'UP', 'green')}
+                </div>`;
+            });
+            document.getElementById('overview-partitions').innerHTML = h;
+        }
+
+        // ==================== Render Nodes Page ====================
+        function renderNodesPage() {
+            let h = '';
+            _nodesData.forEach(n => {
+                const s = (n.state||[]).join('+');
+                const c = stateColor(s);
+                const cpuP = pct(n.alloc_cpus||0, n.cpus||1);
+                const memP = pct(n.alloc_memory||0, n.real_memory||1);
+                h += `<div class="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
+                    <div class="flex justify-between items-center mb-4">
+                        <span class="text-lg font-bold">${n.name||n.hostname}</span>
+                        ${badge(s, c)}
+                    </div>
+                    <div class="space-y-3 text-sm">
+                        <div>
+                            <div class="flex justify-between text-slate-600 mb-1"><span>CPU</span><span>${n.alloc_cpus||0} / ${n.cpus||0} (${cpuP}%)</span></div>
+                            <div class="w-full bg-slate-100 h-2 rounded-full"><div class="bg-blue-500 h-2 rounded-full transition-all" style="width:${cpuP}%"></div></div>
+                        </div>
+                        <div>
+                            <div class="flex justify-between text-slate-600 mb-1"><span>Memory</span><span>${fmem(n.alloc_memory||0)} / ${fmem(n.real_memory||0)} (${memP}%)</span></div>
+                            <div class="w-full bg-slate-100 h-2 rounded-full"><div class="bg-purple-500 h-2 rounded-full transition-all" style="width:${memP}%"></div></div>
+                        </div>
+                        ${n.gres ? `<div class="text-slate-500">GPU: ${n.gres}</div><div class="text-slate-400 text-xs">Used: ${n.gres_used||'none'}</div>` : ''}
+                        <div class="text-xs text-slate-400 pt-2 border-t border-slate-100">
+                            Arch: ${n.architecture||'-'} | OS: ${(n.operating_system||'').substring(0,30)}
+                        </div>
+                    </div>
+                </div>`;
+            });
+            document.getElementById('nodes-grid').innerHTML = h || '<p class="text-slate-400 col-span-3 text-center py-8">No nodes</p>';
+        }
+
+        // ==================== Render Jobs Page ====================
+        function renderJobsPage() {
+            let h = '<table class="w-full text-sm text-left"><thead class="bg-slate-50 text-slate-500"><tr><th class="px-6 py-3 font-medium">Job ID</th><th class="px-6 py-3 font-medium">Name</th><th class="px-6 py-3 font-medium">User</th><th class="px-6 py-3 font-medium">Partition</th><th class="px-6 py-3 font-medium">Status</th><th class="px-6 py-3 font-medium">Nodes</th><th class="px-6 py-3 font-medium">GPUs</th><th class="px-6 py-3 font-medium">Time Limit</th><th class="px-6 py-3 font-medium">Action</th></tr></thead><tbody class="divide-y divide-slate-100">';
+            _jobsData.forEach(j => {
+                const st = (j.job_state||[]).join(',');
+                const c = jobColor(st);
+                const gres = j.tres_req_str||'';
+                const gm = gres.match(/gres\/gpu=(\d+)/);
+                const gpus = gm ? gm[1] : '-';
+                const tl = j.time_limit?.number ? j.time_limit.number+'min' : 'unlimited';
+                h += `<tr class="hover:bg-slate-50">
+                    <td class="px-6 py-4 font-medium text-slate-700">#${j.job_id}</td>
+                    <td class="px-6 py-4">${j.name||'-'}</td>
+                    <td class="px-6 py-4">${j.user_name||'-'}</td>
+                    <td class="px-6 py-4">${j.partition||'-'}</td>
+                    <td class="px-6 py-4">${badge(st,c)}</td>
+                    <td class="px-6 py-4">${j.nodes||'(pending)'}</td>
+                    <td class="px-6 py-4">${gpus}</td>
+                    <td class="px-6 py-4 text-slate-500">${tl}</td>
+                    <td class="px-6 py-4">${st.includes('RUNNING')||st.includes('PENDING') ? `<button onclick="cancelJob(${j.job_id})" class="text-red-500 font-medium hover:underline text-xs">Cancel</button>` : ''}</td>
+                </tr>`;
+            });
+            if (!_jobsData.length) h += '<tr><td colspan="9" class="px-6 py-8 text-center text-slate-400">No jobs</td></tr>';
+            h += '</tbody></table>';
+            document.getElementById('jobs-table').innerHTML = h;
+        }
+
+        // ==================== Submit / Cancel ====================
+        async function submitJob() {
+            const btn = document.getElementById('btn-submit');
+            const result = document.getElementById('submit-result');
+            btn.disabled = true; result.textContent = 'Submitting...'; result.className = 'text-sm text-slate-500';
+
+            const data = {
+                job_name: document.getElementById('f-name').value,
+                partition: document.getElementById('f-partition').value,
+                nodes: document.getElementById('f-nodes').value,
+                cpus: document.getElementById('f-cpus').value,
+                mem: document.getElementById('f-mem').value,
+                gpus: document.getElementById('f-gpus').value,
+                time_limit: document.getElementById('f-time').value,
+                command: document.getElementById('f-command').value,
+            };
+            const res = await postAPI('/submit', data);
+            btn.disabled = false;
+            if (res.error) { result.textContent = res.error; result.className = 'text-sm text-red-500'; }
+            else { result.textContent = res.result; result.className = 'text-sm text-green-600'; setTimeout(refreshAll, 1000); }
+        }
+
+        async function cancelJob(id) {
+            if (!confirm(`Cancel Job #${id}?`)) return;
+            await postAPI('/cancel', {job_id: id});
+            setTimeout(refreshAll, 500);
+        }
+
+        // ==================== W&B / Experiments ====================
+        let _projects = [], _selectedProject = null, _runsCache = [], _charts = {};
+        let _wandbEntity = '', _wandbBaseUrl = 'https://wandb.ai';
+
+        async function loadProjects() {
+            const data = await wandbGet('/projects');
+            if (!data?.projects) {
+                document.getElementById('exp-tabs').innerHTML = '<p class="text-slate-400 text-sm">W&B not available. Set WANDB_API_KEY and WANDB_ENTITY env vars on the server.</p>';
+                return;
+            }
+            _projects = data.projects;
+            _wandbEntity = data.entity || '';
+            _wandbBaseUrl = data.base_url || 'https://wandb.ai';
+            const wbLink = document.getElementById('wandb-link');
+            if (wbLink && _wandbEntity) wbLink.href = `${_wandbBaseUrl}/${_wandbEntity}`;
+
+            renderProjectTabs();
+            if (!_selectedProject && _projects.length) selectProject(_projects[0].name);
+            else if (_selectedProject) loadWandbRuns(_selectedProject);
+        }
+
+        function renderProjectTabs() {
+            let h = '';
+            _projects.forEach(p => {
+                const active = _selectedProject === p.name;
+                h += `<button onclick="selectProject('${p.name}')" class="px-4 py-2 rounded-lg text-sm font-medium transition-all ${active ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}">${p.name} <span class="text-xs opacity-70">(${p.run_count})</span></button>`;
+            });
+            if (!_projects.length) h = '<p class="text-slate-400 text-sm">No projects yet. Run a training script with W&B tracking.</p>';
+            document.getElementById('exp-tabs').innerHTML = h;
+        }
+
+        async function selectProject(name) {
+            _selectedProject = name;
+            renderProjectTabs();
+            // Update "Open W&B" link to project page
+            const wbLink = document.getElementById('wandb-link');
+            if (wbLink && _wandbEntity) wbLink.href = `${_wandbBaseUrl}/${_wandbEntity}/${name}`;
+            await loadWandbRuns(name);
+        }
+
+        async function loadWandbRuns(project) {
+            document.getElementById('exp-runs-title').textContent = `Runs - ${project}`;
+            const data = await wandbGet(`/runs?project=${encodeURIComponent(project)}`);
+            _runsCache = data?.runs || [];
+
+            let h = '<table class="w-full text-sm text-left"><thead class="bg-slate-50 text-slate-500"><tr>';
+            h += '<th class="px-6 py-3 font-medium">Run</th>';
+            h += '<th class="px-6 py-3 font-medium">Status</th>';
+            h += '<th class="px-6 py-3 font-medium">Model</th>';
+            h += '<th class="px-6 py-3 font-medium">LR</th>';
+            h += '<th class="px-6 py-3 font-medium">Batch</th>';
+            h += '<th class="px-6 py-3 font-medium">GPU</th>';
+            h += '<th class="px-6 py-3 font-medium">Val Acc</th>';
+            h += '<th class="px-6 py-3 font-medium">Train Loss</th>';
+            h += '<th class="px-6 py-3 font-medium">Details</th>';
+            h += '</tr></thead><tbody class="divide-y divide-slate-100">';
+
+            _runsCache.forEach(r => {
+                const c = r.config || {};
+                const s = r.summary || {};
+                const st = (r.state || 'unknown').toLowerCase();
+                const stColor = st === 'finished' ? 'green' : st === 'running' ? 'blue' : (st === 'failed' || st === 'crashed') ? 'red' : 'slate';
+                const valAcc = s.best_val_acc ?? s.val_acc;
+
+                h += `<tr class="hover:bg-slate-50">
+                    <td class="px-6 py-4 font-medium text-slate-700">${r.display_name}</td>
+                    <td class="px-6 py-4">${badge(st.toUpperCase(), stColor)}</td>
+                    <td class="px-6 py-4">${c.model||'-'}</td>
+                    <td class="px-6 py-4 font-mono text-xs">${c.learning_rate||c.lr||'-'}</td>
+                    <td class="px-6 py-4">${c.batch_size||'-'}</td>
+                    <td class="px-6 py-4">${c.gpu_type||'-'}</td>
+                    <td class="px-6 py-4 font-bold ${(valAcc||0)>0.9?'text-green-600':'text-slate-700'}">${valAcc != null ? (valAcc*100).toFixed(1)+'%' : '-'}</td>
+                    <td class="px-6 py-4">${s.final_train_loss ?? s.train_loss ?? '-'}</td>
+                    <td class="px-6 py-4"><button onclick="showRunDetail('${r.name}')" class="text-blue-600 hover:underline text-xs font-medium">View</button></td>
+                </tr>`;
+            });
+            if (!_runsCache.length) h += '<tr><td colspan="9" class="px-6 py-8 text-center text-slate-400">No runs yet</td></tr>';
+            h += '</tbody></table>';
+            document.getElementById('exp-runs-table').innerHTML = h;
+            document.getElementById('exp-run-detail').classList.add('hidden');
+        }
+
+        async function showRunDetail(runName) {
+            const run = _runsCache.find(r => r.name === runName);
+            if (!run) return;
+
+            // Params
+            let ph = '';
+            Object.entries(run.config || {}).forEach(([k, v]) => {
+                ph += `<div class="flex justify-between text-sm"><span class="text-slate-500">${k}</span><span class="font-mono font-medium">${v}</span></div>`;
+            });
+            document.getElementById('run-params').innerHTML = ph || '<p class="text-slate-400 text-sm">No parameters</p>';
+
+            // Metrics summary
+            let mh = '';
+            Object.entries(run.summary || {}).forEach(([k, v]) => {
+                const val = typeof v === 'number' ? v.toFixed(4) : v;
+                mh += `<div class="flex justify-between text-sm"><span class="text-slate-500">${k}</span><span class="font-mono font-medium">${val}</span></div>`;
+            });
+            document.getElementById('run-metrics').innerHTML = mh || '<p class="text-slate-400 text-sm">No metrics</p>';
+
+            document.getElementById('exp-run-detail').classList.remove('hidden');
+            await loadMetricCharts(runName);
+        }
+
+        async function loadMetricCharts(runName) {
+            if (_charts.loss) _charts.loss.destroy();
+            if (_charts.acc) _charts.acc.destroy();
+
+            const data = await wandbGet(`/history?project=${encodeURIComponent(_selectedProject)}&run=${encodeURIComponent(runName)}`);
+            const history = data?.history || [];
+
+            const steps = [], trainLoss = [], valLoss = [], trainAcc = [], valAcc = [];
+            history.forEach(row => {
+                const step = row._step !== undefined ? row._step : steps.length;
+                if (row.train_loss !== undefined || row.val_loss !== undefined ||
+                    row.train_acc !== undefined || row.val_acc !== undefined) {
+                    steps.push(step);
+                    trainLoss.push(row.train_loss ?? null);
+                    valLoss.push(row.val_loss ?? null);
+                    trainAcc.push(row.train_acc ?? null);
+                    valAcc.push(row.val_acc ?? null);
+                }
+            });
+
+            const chartOpts = {
+                responsive: true,
+                plugins: { legend: { position: 'top' } },
+                scales: { x: { title: { display: true, text: 'Step' } } },
+                spanGaps: true,
+            };
+
+            _charts.loss = new Chart(document.getElementById('chart-loss'), {
+                type: 'line',
+                data: {
+                    labels: steps,
+                    datasets: [
+                        { label: 'Train Loss', data: trainLoss, borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.1)', fill: true, tension: 0.3 },
+                        { label: 'Val Loss', data: valLoss, borderColor: '#f97316', backgroundColor: 'rgba(249,115,22,0.1)', fill: true, tension: 0.3 },
+                    ]
+                },
+                options: { ...chartOpts, plugins: { ...chartOpts.plugins, title: { display: true, text: 'Loss' } } }
+            });
+
+            _charts.acc = new Chart(document.getElementById('chart-acc'), {
+                type: 'line',
+                data: {
+                    labels: steps,
+                    datasets: [
+                        { label: 'Train Acc', data: trainAcc, borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.1)', fill: true, tension: 0.3 },
+                        { label: 'Val Acc', data: valAcc, borderColor: '#8b5cf6', backgroundColor: 'rgba(139,92,246,0.1)', fill: true, tension: 0.3 },
+                    ]
+                },
+                options: { ...chartOpts, plugins: { ...chartOpts.plugins, title: { display: true, text: 'Accuracy' } } }
+            });
+        }
+
+        // ==================== Refresh ====================
+        async function refreshAll() {
+            const [nd, jd] = await Promise.all([fetchAPI('/nodes'), fetchAPI('/jobs')]);
+            _nodesData = nd?.nodes || [];
+            _jobsData = jd?.jobs || [];
+            renderOverview();
+            renderNodesPage();
+            renderJobsPage();
+            renderPartitions();
+            document.getElementById('last-update').textContent = 'Updated: ' + new Date().toLocaleTimeString();
+        }
+
+        refreshAll();
+        setInterval(refreshAll, 10000);
+    </script>
+</body>
+</html>
