@@ -22,8 +22,12 @@ GRANT ALL PRIVILEGES ON slurm_acct_db.* TO 'slurm'@'localhost';
 FLUSH PRIVILEGES;
 SQL
 
-echo "[2/5] Munge 키 생성..."
-/usr/sbin/mungekey
+echo "[2/5] Munge 키 설정..."
+if [ -f /etc/munge/munge.key ]; then
+    echo "  munge 키가 이미 존재합니다. 기존 키를 사용합니다."
+else
+    /usr/sbin/mungekey
+fi
 chown munge:munge /etc/munge/munge.key
 chmod 400 /etc/munge/munge.key
 systemctl enable --now munge
@@ -34,8 +38,13 @@ if [ ! -d /tmp/slurm ]; then
     git clone --depth 1 -b slurm-25-11-2-1 https://github.com/SchedMD/slurm.git
 fi
 cd /tmp/slurm
+# Ubuntu 24.04: mysql_config → mariadb_config로 이름 변경됨. 심볼릭 링크 생성
+if [ ! -f /usr/bin/mysql_config ] && [ -f /usr/bin/mariadb_config ]; then
+    ln -sf /usr/bin/mariadb_config /usr/bin/mysql_config
+    echo "  Created symlink: mysql_config → mariadb_config"
+fi
 ./configure --prefix=/usr --sysconfdir=/etc/slurm \
-    --with-mysql_config=/usr/bin/mysql_config --with-munge=/usr
+    --with-mysql_config=/usr/bin --with-munge=/usr
 make -j$(nproc)
 make install
 
