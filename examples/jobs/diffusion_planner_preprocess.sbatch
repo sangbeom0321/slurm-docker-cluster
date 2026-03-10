@@ -27,6 +27,7 @@ echo ""
 apptainer exec \
     --bind /data:/data \
     --bind /workspace:/workspace \
+    --pwd /opt/Diffusion-Planner \
     ${CONTAINER} \
     python3 /opt/Diffusion-Planner/data_process.py \
         --data_path ${NUPLAN_DATA} \

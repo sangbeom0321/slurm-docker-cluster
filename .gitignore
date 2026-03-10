@@ -68,3 +68,5 @@ docker-compose.override.yml
 rpmbuild/
 archive/
 .claude/
+home/
+mlflow-data/

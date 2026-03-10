@@ -590,3 +590,82 @@ sinfo -N -o "%N %G %C"                # 노드별 GPU/CPU
 # http://192.168.1.10:3080             # 웹 대시보드
 # http://192.168.1.10:6006             # TensorBoard 직접 접속
 ```
+
+SLURM → Diffusion-Planner 학습 → 대시보드 전체 흐름 (간략)                                                                                                                               
+                                                                                                                                                                                           
+  1. Docker 이미지 빌드 + SIF 변환                                                                                                                                                         
+                                                                                                                                                                                           
+  # 프로젝트 Docker 이미지 빌드                                                                                                                                                          
+  cd /data/projects/Diffusion-Planner                                                                                                                                                      
+  docker buildx build --build-context nuplan-devkit=/data/projects/nuplan-devkit -t diffusion-planner:latest .
+                                                                                                                                                                                           
+  # Apptainer SIF로 변환 → NAS 공유 디렉토리에 배치                                                                                                                                        
+  docker save diffusion-planner:latest -o /tmp/dp.tar                                                                                                                                      
+  apptainer build /sw/containers/diffusion_planner.sif docker-archive:///tmp/dp.tar
+
+  2. 데이터 전처리 (sbatch)
+
+  sbatch << 'EOF'
+  #!/bin/bash
+  #SBATCH --job-name=dp-preprocess
+  #SBATCH --output=/data/logs/preprocess_%j.out
+  apptainer exec --bind /data:/data /sw/containers/diffusion_planner.sif \
+      python3 /opt/Diffusion-Planner/data_process.py \
+      --data_path /data/nuplan-v1.1/splits/mini \
+      --map_path /data/nuplan-v1.1/maps \
+      --save_path /data/diffusion_planner/preprocessed \
+      --total_scenarios 100
+  EOF
+
+  3. 학습 Job 제출 (sbatch + Apptainer + DDP)
+
+  sbatch << 'EOF'
+  #!/bin/bash
+  #SBATCH --job-name=dp-train
+  #SBATCH --output=/data/logs/dp_train_%j.out
+  #SBATCH --gres=gpu:4
+  #SBATCH --partition=4090
+  #SBATCH --time=48:00:00
+  apptainer exec --nv --bind /data:/data /sw/containers/diffusion_planner.sif \
+      python3 -m torch.distributed.run --nnodes 1 --nproc-per-node 4 --standalone \
+      /opt/Diffusion-Planner/train_predictor.py \
+      --train_set /data/diffusion_planner/preprocessed \
+      --train_set_list /data/diffusion_planner/training_files.json
+  EOF
+  - SLURM이 SLURM_PROCID 환경변수를 세팅 → ddp.py가 자동 감지하여 DDP 초기화
+
+ - 멀티노드도 가능: --nodes=2 --ntasks-per-node=4 + srun apptainer exec ...
+
+  4. 백엔드 서버 (slurmrestd + 대시보드 프록시)
+
+  # JWT 키 생성 (1회)
+  openssl rand -hex 32 > /etc/slurm/jwt_hs256.key
+
+  # slurmrestd 시작 (REST API)
+  sudo -u slurm slurmrestd 0.0.0.0:6820 &
+
+  # 대시보드 프록시 서버 시작
+  cd /sw/slurm-dashboard
+  python3 server.py &
+  # 또는 systemd: sudo systemctl start slurm-dashboard
+
+  5. 대시보드 접속
+
+  http://computer0:3080   ← AILAB 대시보드 (Overview, Submit Job, Jobs, Nodes, Experiments)
+  http://computer0:6006   ← TensorBoard 직접 접속
+
+  대시보드 기능:
+
+  ┌─────────────┬─────────────────────────────────────────────────────┐
+  │     탭      │                        기능                         │
+  ├─────────────┼─────────────────────────────────────────────────────┤
+  │ Overview    │ 노드 상태, CPU 사용률, Running/Pending 잡           │
+  ├─────────────┼─────────────────────────────────────────────────────┤
+  │ Submit Job  │ 웹에서 잡 제출                                      │
+  ├─────────────┼─────────────────────────────────────────────────────┤
+  │ Jobs        │ 잡 큐 확인 + Cancel                                 │
+  ├─────────────┼─────────────────────────────────────────────────────┤
+  │ Nodes       │ 노드별 CPU/Memory/GPU 바                            │
+  ├─────────────┼─────────────────────────────────────────────────────┤
+  │ Experiments │ TensorBoard 이벤트 스캔 + TensorBoard iframe 임베드 │
+  └─────────────┴─────────────────────────────────────────────────────┘

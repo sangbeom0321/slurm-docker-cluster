@@ -6,6 +6,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --gres=gpu:1
+#SBATCH --partition=gpu
 #SBATCH --time=24:00:00
 
 #
@@ -44,11 +45,15 @@ NGPUS=${SLURM_GPUS_ON_NODE:-1}
 apptainer exec --nv \
     --bind /data:/data \
     --bind /workspace:/workspace \
+    --pwd /opt/Diffusion-Planner \
+    --env MASTER_ADDR=127.0.0.1 \
+    --env MASTER_PORT=29500 \
     ${CONTAINER} \
     python3 -m torch.distributed.run \
         --nnodes 1 \
         --nproc-per-node ${NGPUS} \
-        --standalone \
+        --master-addr 127.0.0.1 \
+        --master-port 29500 \
         /opt/Diffusion-Planner/train_predictor.py \
         --train_set ${TRAIN_DATA} \
         --train_set_list ${TRAIN_LIST} \
@@ -56,7 +61,7 @@ apptainer exec --nv \
         --train_epochs 10 \
         --save_utd 5 \
         --save_dir ${SAVE_DIR} \
-        --use_wandb False \
+        --port 29500 \
         --num_workers 2
 
 echo ""

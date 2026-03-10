@@ -1217,7 +1217,6 @@ apptainer exec --nv \
         --batch_size 512 \
         --train_epochs 100 \
         --save_dir /data/diffusion_planner/output \
-        --use_wandb True
 EOF
 ```
 
@@ -1252,7 +1251,6 @@ srun apptainer exec --nv \
         --batch_size 2048 \
         --train_epochs 500 \
         --save_dir /data/diffusion_planner/output \
-        --use_wandb True
 EOF
 ```
 
@@ -1269,16 +1267,6 @@ writer = SummaryWriter(log_dir="/data/my_project/output/tb")
 ```
 
 대시보드 Experiments 탭에서 Runs 목록과 TensorBoard UI를 확인할 수 있습니다.
-
-#### W&B (선택)
-
-W&B를 병행 사용하려면 환경변수 설정:
-
-```bash
-# .bashrc 또는 sbatch 스크립트 내에서
-export WANDB_API_KEY=your_api_key
-export WANDB_ENTITY=your_team
-```
 
 ---
 
