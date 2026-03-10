@@ -61,26 +61,28 @@ cat slurm-*.out                                      # 결과 확인
 
 ## Step 5. 대시보드 & slurmrestd 시작 (PC1 마스터에서)
 
+`setup-master.sh`가 JWT 키를 자동 생성하고 `slurm.conf`에 JWT 인증 설정이 포함되어 있으므로,
+별도 설정 없이 바로 시작할 수 있다.
+
 ```bash
 # slurmrestd 시작 (REST API - 대시보드 백엔드)
-# slurm.conf에 JWT 인증 설정 필요:
-#   AuthAltTypes=auth/jwt
-#   AuthAltParameters=jwt_key=/etc/slurm/jwt_hs256.key
-
-# JWT 키 생성 (최초 1회)
-sudo openssl rand -hex 32 | sudo tee /etc/slurm/jwt_hs256.key > /dev/null
-sudo chown slurm:slurm /etc/slurm/jwt_hs256.key
-sudo chmod 600 /etc/slurm/jwt_hs256.key
-sudo systemctl restart slurmdbd slurmctld
-
-# slurmrestd 시작
-sudo -u slurm slurmrestd 0.0.0.0:6820 &
+# 주의: SlurmUser(slurm)가 아닌 일반 사용자로 실행해야 함
+slurmrestd 0.0.0.0:6820 &
 
 # 대시보드 시작
 cd slurm-docker-cluster/slurm-dashboard
 python3 server.py &
 
 # 접속: http://<마스터IP>:3080
+```
+
+JWT 키를 수동으로 재생성해야 하는 경우:
+
+```bash
+sudo openssl rand -hex 32 | sudo tee /etc/slurm/jwt_hs256.key > /dev/null
+sudo chown slurm:slurm /etc/slurm/jwt_hs256.key
+sudo chmod 600 /etc/slurm/jwt_hs256.key
+sudo systemctl restart slurmdbd slurmctld slurmd
 ```
 
 대시보드 기능:
