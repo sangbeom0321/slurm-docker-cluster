@@ -1,242 +1,122 @@
-# Slurm Docker Cluster
+# SLURM Bare-Metal GPU Cluster
 
-**Slurm Docker Cluster** is a multi-container Slurm cluster designed for rapid
-deployment using Docker Compose. This repository simplifies the process of
-setting up a robust Slurm environment for development, testing, or lightweight
-usage.
+베어메탈 SLURM GPU 클러스터. Ubuntu 22.04/24.04 + SLURM 25.11.2.
+`cluster.conf` 하나로 노드 추가/삭제 관리.
 
-## 🏁 Quick Start
+## 현재 구성 (2PC 테스트)
 
-**Requirements:** [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/)
+| 호스트명 | IP | GPU | 역할 |
+|---------|-----|-----|------|
+| daniel | 192.168.0.47 | RTX 5060 Ti (16GB) | 마스터 + 워커 |
+| 5090 | 192.168.0.153 | RTX 5090 (32GB) | 워커 |
+
+## 향후 확장 구성 (9대 + NAS)
+
+```
+                         ┌─────────┐
+                         │   NAS   │  192.168.1.20
+                         │  (NFS)  │
+                         └────┬────┘
+                              │
+      ┌───────────────────────┼───────────────────────┐
+      │                       │                       │
+ ┌────┴──────┐    ┌───────────┴───────────┐    ┌──────┴──────┐
+ │ computer0 │    │  computer1~4 (3090x4) │    │ computer8   │
+ │ 마스터+계산│    │  계산 노드             │    │ A6000 x4    │
+ │ 3080 x4   │    ├───────────────────────┤    │ 계산 노드    │
+ │            │    │  computer5~7 (4090x4) │    └─────────────┘
+ └───────────┘    │  계산 노드             │
+ 192.168.1.10     └───────────────────────┘
+                   192.168.1.11~17          192.168.1.18
+```
+
+## 프로젝트 구조
+
+```
+├── cluster.conf            # 노드 정의 (이 파일만 수정하면 확장 가능)
+├── config/                 # SLURM 설정 (자동 생성됨)
+│   ├── slurm.conf
+│   ├── slurmdbd.conf
+│   ├── gres.conf
+│   └── cgroup.conf
+├── scripts/
+│   ├── generate-slurm-conf.sh  # cluster.conf → slurm.conf 생성
+│   ├── setup-common.sh         # 공통 설치 (모든 노드)
+│   ├── setup-master.sh         # 마스터 설치
+│   └── setup-worker.sh         # 워커 설치
+├── examples/jobs/          # 잡 제출 예제
+├── slurm-dashboard/        # 웹 대시보드
+└── docs/                   # 상세 가이드 문서
+```
+
+## Quick Start
+
+### 1. 마스터 노드
 
 ```bash
-git clone https://github.com/giovtorres/slurm-docker-cluster.git
+git clone https://github.com/sangbeom0321/slurm-docker-cluster.git
 cd slurm-docker-cluster
-cp .env.example .env    # optional: edit to change version, enable GPU, etc.
 
-# Option A: Pull pre-built image from Docker Hub (fastest)
-docker pull giovtorres/slurm-docker-cluster:latest
-docker tag giovtorres/slurm-docker-cluster:latest slurm-docker-cluster:25.11.2
+# cluster.conf 확인/수정 (노드 IP, GPU 스펙)
+vi cluster.conf
 
-# Option B: Build from source
-make build
-
-# Start the cluster
-make up
-make status             # verify nodes are idle
-make test               # run full test suite
-make help               # see all available commands
+# 설치
+sudo bash scripts/setup-common.sh
+sudo bash scripts/setup-master.sh
 ```
 
-**Supported Slurm versions:** 25.11.x, 25.05.x (last two Major.Minor releases)
-
-**Supported architectures (auto-detected):** AMD64, ARM64
-
-## 📦 What's Included
-
-**Containers:**
-
-- **mysql** - Job and cluster database
-- **slurmdbd** - Database daemon for accounting
-- **slurmctld** - Controller for job scheduling
-- **slurmrestd** - REST API daemon (HTTP/JSON access)
-- **c1, c2** - CPU compute nodes (dynamically scalable)
-- **g1** - (optional) GPU compute node with NVIDIA support (dynamically scalable)
-- **elasticsearch** - (optional) indexing jobs
-- **kibana** - (optional) visualization for elasticsearch
-
-**Persistent volumes:**
-
-- Configuration (`etc_slurm`)
-- Logs (`var_log_slurm`)
-- Job files (`slurm_jobdir`)
-- Database (`var_lib_mysql`)
-- Authentication (`etc_munge`)
-
-## 🖥️ Using the Cluster
+### 2. Munge 키 복사 (각 워커로)
 
 ```bash
-# Access controller
-make shell
-
-# Inside controller:
-sinfo                          # View cluster status
-sbatch --wrap="hostname"       # Submit job
-squeue                         # View queue
-sacct                          # View accounting
-
-# Or run example jobs
-make run-examples
+sudo scp /etc/munge/munge.key <user>@<워커IP>:/tmp/
 ```
 
-## 📈 Scaling
-
-Compute nodes use Slurm's dynamic registration (`slurmd -Z`) and self-register
-with sequential hostnames (c1, c2, c3... for CPU; g1, g2... for GPU). Scale up
-or down at any time without rebuilding.
-
-### Scale CPU Workers
+### 3. 워커 노드 (각 워커에서)
 
 ```bash
-# Scale to 5 CPU workers (default is 2)
-make scale-cpu-workers N=5
-
-# Or set the default count in .env
-CPU_WORKER_COUNT=4
-make up
+git clone https://github.com/sangbeom0321/slurm-docker-cluster.git
+cd slurm-docker-cluster
+sudo bash scripts/setup-common.sh
+sudo bash scripts/setup-worker.sh
 ```
 
-### Scale GPU Workers
+### 4. 확인
 
 ```bash
-# Scale to 3 GPU workers (requires GPU_ENABLE=true)
-make scale-gpu-workers N=3
+sinfo                                               # 노드 상태
+sbatch --gres=gpu:1 --wrap="hostname && nvidia-smi"  # GPU 테스트
 ```
 
-Verify with `make status`.
-
-## 📊 Monitoring
-
-### REST API
-
-Query cluster via REST API (version auto-detected: v0.0.44 for 25.11.x, v0.0.42 for 25.05.x):
+## 노드 추가/삭제
 
 ```bash
-# Get JWT Token
-JWT_TOKEN=$(docker exec slurmctld scontrol token 2>&1 | grep "SLURM_JWT=" | cut -d'=' -f2)
+# 1. cluster.conf에 노드 추가
+echo "newnode  192.168.0.200  32  64000  4090  2  worker" >> cluster.conf
 
-# Get nodes
-docker exec slurmrestd curl -s -H "X-SLURM-USER-TOKEN: $JWT_TOKEN" \
-  http://localhost:6820/slurm/v0.0.42/nodes | jq .nodes
+# 2. slurm.conf 재생성
+bash scripts/generate-slurm-conf.sh
 
-# Get partitions
-docker exec slurmrestd curl -s -H "X-SLURM-USER-TOKEN: $JWT_TOKEN" \
-  http://localhost:6820/slurm/v0.0.42/partitions | jq .partitions
+# 3. 모든 노드에 slurm.conf 배포 후 리로드
+scontrol reconfigure
 ```
 
-### Elasticsearch and Kibana (Optional)
+## 주요 명령어
 
-Enable job completion monitoring and visualization:
+| 명령어 | 설명 |
+|--------|------|
+| `sinfo` | 클러스터/노드 상태 |
+| `sbatch job.sh` | 잡 제출 |
+| `squeue` | 잡 큐 확인 |
+| `scancel <ID>` | 잡 취소 |
+| `sacct` | 잡 히스토리 |
+| `scontrol reconfigure` | 설정 리로드 |
 
-```bash
-# 1. Setting ELASTICSEARCH_HOST in .env enables the monitoring profile
-ELASTICSEARCH_HOST=http://elasticsearch:9200
+## 문서
 
-# 2. Start cluster (monitoring auto-enabled)
-make up
+- [클러스터 구축 가이드](docs/slurm-cluster-setup-guide.md) - 상세 설치 (9대 서버 기준)
+- [Apptainer 가이드](docs/slurm-cluster-setup-guide-apptainer.md) - 컨테이너 기반 ML 학습
+- [사용자 가이드](docs/slurm-user-guide.md) - 잡 제출/관리
 
-# 3. Access Kibana at http://localhost:5601
-# After loading, click: Elasticsearch → Index Management → slurm → Discover index
+## License
 
-# 4. Query job completions directly
-docker exec elasticsearch curl -s "http://localhost:9200/slurm/_search?pretty"
-
-# Test monitoring
-make test-monitoring
-```
-
-**Indexed data:** Job ID, user, partition, state, times, nodes, exit code
-
-## 🎮 GPU Support (NVIDIA)
-
-Enable optional NVIDIA GPU support using [NVIDIA's official CUDA base images](https://hub.docker.com/r/nvidia/cuda/tags):
-
-```bash
-# 1. One-time host setup (add NVIDIA repo and install nvidia-container-toolkit)
-curl -s -L https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo \
-  | sudo tee /etc/yum.repos.d/nvidia-container-toolkit.repo
-sudo dnf install -y nvidia-container-toolkit
-sudo nvidia-ctk runtime configure --runtime=docker
-sudo systemctl restart docker
-
-# 2. Enable GPU in .env (uses NVIDIA's official CUDA base images)
-GPU_ENABLE=true
-BUILDER_BASE=nvidia/cuda:13.1.1-devel-rockylinux9
-RUNTIME_BASE=nvidia/cuda:13.1.1-base-rockylinux9
-
-# 3. Build with GPU support
-make rebuild
-
-# 4. Verify GPU detection
-docker exec g1 nvidia-smi
-
-# Test GPU functionality
-make test-gpu
-```
-
-> **Note:** GPU testing is not included in CI (GitHub-hosted runners have no GPUs). Run `make test-gpu` manually on a host with an NVIDIA GPU and `nvidia-container-toolkit` installed.
-
-## 🔄 Cluster Management
-
-```bash
-make down     # Stop cluster (keeps data)
-make clean    # Remove all containers and volumes
-make rebuild  # Clean, rebuild, and restart
-make logs     # View container logs
-```
-
-> **Note:** If `ELASTICSEARCH_HOST` is set in `.env`, monitoring containers are automatically managed.
-
-## 🐳 Docker Hub
-
-Pre-built multi-arch images (amd64 + arm64) are published on each [GitHub release](https://github.com/giovtorres/slurm-docker-cluster/releases):
-
-```bash
-# CPU images
-docker pull giovtorres/slurm-docker-cluster:latest
-docker pull giovtorres/slurm-docker-cluster:25.11.2          # latest build for this Slurm version
-docker pull giovtorres/slurm-docker-cluster:25.11.2-2.1.0   # pinned to a specific release
-
-# GPU images (built on nvidia/cuda base)
-docker pull giovtorres/slurm-docker-cluster:latest-gpu
-docker pull giovtorres/slurm-docker-cluster:25.11.2-gpu
-docker pull giovtorres/slurm-docker-cluster:25.11.2-gpu-2.1.0
-```
-
-## ⚙️ Advanced
-
-### Version Management
-
-```bash
-make set-version VER=25.05.6   # Switch Slurm version
-make version                   # Show current version
-make build-all                 # Build all supported versions
-make test-all                  # Test all versions
-```
-
-### Configuration Updates
-
-```bash
-# Live edit (persists across restarts)
-docker exec -it slurmctld vi /etc/slurm/slurm.conf
-make reload-slurm
-
-# Push local changes
-vi config/25.05/slurm.conf
-make update-slurm FILES="slurm.conf"
-
-# Permanent changes
-make rebuild
-```
-
-### Multi-Architecture Builds
-
-```bash
-# Cross-platform build (uses QEMU emulation)
-docker buildx build --platform linux/arm64 \
-  --build-arg SLURM_VERSION=25.05.6 \
-  --load -t slurm-docker-cluster:25.05.6 .
-```
-
-## 📚 Documentation
-
-- **Commands:** Run `make help` for all available commands
-- **Examples:** Job scripts in `examples/` directory
-
-## 🤝 Contributing
-
-Contributions are welcomed! Fork this repo, create a branch, and submit a pull request.
-
-## 📄 License
-
-This project is licensed under the [MIT License](LICENSE).
+[MIT License](LICENSE)
