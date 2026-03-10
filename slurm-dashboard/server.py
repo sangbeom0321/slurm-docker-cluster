@@ -25,13 +25,13 @@ _jwt_cache = {"token": None, "expires": 0}
 
 
 def get_jwt_token():
-    """Get JWT token from slurmctld container, with caching."""
+    """Get JWT token from local scontrol, with caching."""
     now = time.time()
     if _jwt_cache["token"] and _jwt_cache["expires"] > now:
         return _jwt_cache["token"]
     try:
         result = subprocess.run(
-            ["docker", "exec", "slurmctld", "scontrol", "token"],
+            ["scontrol", "token"],
             capture_output=True, text=True, timeout=5
         )
         for line in result.stdout.splitlines():
@@ -45,10 +45,10 @@ def get_jwt_token():
     return None
 
 
-def docker_exec(cmd_str, timeout=15):
-    """Execute a command inside slurmctld container and return stdout."""
+def local_exec(cmd_str, timeout=15):
+    """Execute a command locally and return stdout."""
     result = subprocess.run(
-        ["docker", "exec", "slurmctld", "bash", "-c", cmd_str],
+        ["bash", "-c", cmd_str],
         capture_output=True, text=True, timeout=timeout
     )
     return result.stdout, result.stderr
@@ -106,8 +106,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         time_limit = data.get("time_limit", "")
         command = data.get("command", "hostname")
 
-        cmd = ["docker", "exec", "slurmctld", "bash", "-c"]
-        sbatch = f"cd /data && sbatch --job-name={job_name}"
+        sbatch = f"sbatch --job-name={job_name}"
         if partition:
             sbatch += f" --partition={partition}"
         if nodes and nodes != "1":
@@ -121,10 +120,12 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         if time_limit:
             sbatch += f" --time={time_limit}"
         sbatch += f" --wrap='{command}'"
-        cmd.append(sbatch)
 
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            result = subprocess.run(
+                ["bash", "-c", sbatch],
+                capture_output=True, text=True, timeout=10
+            )
             output = result.stdout.strip() + result.stderr.strip()
             self.send_json({"result": output})
         except Exception as e:
@@ -145,7 +146,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             return
         try:
             result = subprocess.run(
-                ["docker", "exec", "slurmctld", "scancel", str(job_id)],
+                ["scancel", str(job_id)],
                 capture_output=True, text=True, timeout=10
             )
             output = result.stdout.strip() + result.stderr.strip()
@@ -232,7 +233,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         """GET /api/runs - scan /data for TensorBoard event files."""
         try:
             # Find all TensorBoard event files
-            stdout, _ = docker_exec(
+            stdout, _ = local_exec(
                 "find /data -name 'events.out.tfevents.*' -type f 2>/dev/null | sort -r | head -100",
                 timeout=30
             )
@@ -264,12 +265,12 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                     project_name = os.path.basename(os.path.dirname(os.path.dirname(train_dir)))
 
                 # Get event file info for timing
-                stat_out, _ = docker_exec(f"stat -c '%Y' '{event_path}' 2>/dev/null")
+                stat_out, _ = local_exec(f"stat -c '%Y' '{event_path}' 2>/dev/null")
                 mtime = int(stat_out.strip()) if stat_out.strip().isdigit() else 0
                 started_at = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(mtime)) if mtime else ""
 
                 # Check if still being written (running vs finished)
-                age_out, _ = docker_exec(
+                age_out, _ = local_exec(
                     f"echo $(( $(date +%s) - $(stat -c '%Y' '{event_path}') ))"
                 )
                 try:
@@ -279,7 +280,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                     state = "finished"
 
                 # Read scalar tags summary (quick peek at what metrics exist)
-                tags_out, _ = docker_exec(
+                tags_out, _ = local_exec(
                     f"""python3 -c "
 import json
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
@@ -332,7 +333,7 @@ print(json.dumps({{'tags': tags, 'summary': summary}}))
 
         try:
             # Use tensorboard's EventAccumulator inside the container
-            history_out, err = docker_exec(
+            history_out, err = local_exec(
                 f"""python3 -c "
 import json
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
@@ -377,7 +378,7 @@ print(json.dumps({{'history': history, 'tags': tags}}))
 
         try:
             # Find related log files (.out and .err from Slurm)
-            logs_out, _ = docker_exec(
+            logs_out, _ = local_exec(
                 f"find '{train_dir}' -maxdepth 3 -name '*.out' -o -name '*.log' 2>/dev/null | sort -r | head -5; "
                 f"find /data -maxdepth 4 -name 'train_*.out' 2>/dev/null | sort -r | head -5"
             )
@@ -387,11 +388,11 @@ print(json.dumps({{'history': history, 'tags': tags}}))
             for log_path in logs_out.strip().splitlines():
                 if not log_path:
                     continue
-                content, _ = docker_exec(f"tail -n {max_lines} '{log_path}' 2>/dev/null")
+                content, _ = local_exec(f"tail -n {max_lines} '{log_path}' 2>/dev/null")
                 stdout_log = content
                 # Also get corresponding .err file
                 err_path = log_path.replace(".out", ".err")
-                err_content, _ = docker_exec(f"tail -n {max_lines} '{err_path}' 2>/dev/null")
+                err_content, _ = local_exec(f"tail -n {max_lines} '{err_path}' 2>/dev/null")
                 stderr_log = err_content
                 break
 

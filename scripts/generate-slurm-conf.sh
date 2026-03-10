@@ -37,6 +37,8 @@ ClusterName=gpucluster
 SlurmctldHost=${MASTER_HOST}
 SlurmUser=slurm
 AuthType=auth/munge
+AuthAltTypes=auth/jwt
+AuthAltParameters=jwt_key=/etc/slurm/jwt_hs256.key
 
 GresTypes=gpu
 

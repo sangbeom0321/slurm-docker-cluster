@@ -53,7 +53,7 @@ cp etc/slurmd.service /etc/systemd/system/
 cp etc/slurmdbd.service /etc/systemd/system/
 systemctl daemon-reload
 
-echo "[4/5] slurm.conf 생성 & 배포..."
+echo "[4/6] slurm.conf 생성 & 배포..."
 bash "$SCRIPT_DIR/generate-slurm-conf.sh"
 cp "$PROJECT_DIR/config/slurm.conf" /etc/slurm/
 cp "$PROJECT_DIR/config/slurmdbd.conf" /etc/slurm/
@@ -62,7 +62,16 @@ cp "$PROJECT_DIR/config/cgroup.conf" /etc/slurm/
 chown slurm:slurm /etc/slurm/slurmdbd.conf
 chmod 600 /etc/slurm/slurmdbd.conf
 
-echo "[5/5] 데몬 시작..."
+echo "[5/6] JWT 키 생성 (slurmrestd 인증용)..."
+if [ -f /etc/slurm/jwt_hs256.key ]; then
+    echo "  JWT 키가 이미 존재합니다. 기존 키를 사용합니다."
+else
+    openssl rand -hex 32 > /etc/slurm/jwt_hs256.key
+fi
+chown slurm:slurm /etc/slurm/jwt_hs256.key
+chmod 600 /etc/slurm/jwt_hs256.key
+
+echo "[6/6] 데몬 시작..."
 systemctl enable --now slurmdbd
 sleep 3
 systemctl enable --now slurmctld
