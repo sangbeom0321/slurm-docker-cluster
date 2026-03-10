@@ -59,6 +59,95 @@ squeue                                               # 잡 큐
 cat slurm-*.out                                      # 결과 확인
 ```
 
+## Step 5. 대시보드 & slurmrestd 시작 (PC1 마스터에서)
+
+```bash
+# slurmrestd 시작 (REST API - 대시보드 백엔드)
+# slurm.conf에 JWT 인증 설정 필요:
+#   AuthAltTypes=auth/jwt
+#   AuthAltParameters=jwt_key=/etc/slurm/jwt_hs256.key
+
+# JWT 키 생성 (최초 1회)
+sudo openssl rand -hex 32 | sudo tee /etc/slurm/jwt_hs256.key > /dev/null
+sudo chown slurm:slurm /etc/slurm/jwt_hs256.key
+sudo chmod 600 /etc/slurm/jwt_hs256.key
+sudo systemctl restart slurmdbd slurmctld
+
+# slurmrestd 시작
+sudo -u slurm slurmrestd 0.0.0.0:6820 &
+
+# 대시보드 시작
+cd slurm-docker-cluster/slurm-dashboard
+python3 server.py &
+
+# 접속: http://<마스터IP>:3080
+```
+
+대시보드 기능:
+
+| 탭 | 기능 |
+|---|---|
+| Overview | 노드 상태, CPU 사용률, Running/Pending 잡 |
+| Submit Job | 웹에서 잡 제출 |
+| Jobs | 잡 큐 확인 + Cancel |
+| Nodes | 노드별 CPU/Memory/GPU |
+| Experiments | TensorBoard 임베드 |
+
+---
+
+## Step 6. Diffusion-Planner 학습 (Apptainer)
+
+### 6-1. Apptainer 설치 (모든 노드)
+
+```bash
+sudo apt install -y apptainer
+```
+
+### 6-2. Docker 이미지 빌드 → SIF 변환 (PC1에서)
+
+```bash
+cd /path/to/Diffusion-Planner
+
+# Docker 이미지 빌드 (nuplan-devkit 경로 지정)
+docker buildx build \
+    --build-context nuplan-devkit=/path/to/nuplan-devkit \
+    -t diffusion-planner:latest .
+
+# Apptainer SIF로 변환
+docker save diffusion-planner:latest -o /tmp/dp.tar
+apptainer build /data/containers/diffusion_planner.sif docker-archive:///tmp/dp.tar
+rm /tmp/dp.tar
+```
+
+### 6-3. 데이터 전처리 잡 제출
+
+```bash
+sbatch examples/jobs/diffusion_planner_preprocess.sbatch
+squeue                                                        # 상태 확인
+cat /data/diffusion_planner/logs/preprocess_*.out             # 결과 확인
+```
+
+### 6-4. 학습 잡 제출
+
+```bash
+sbatch examples/jobs/diffusion_planner_train.sbatch
+squeue                                                        # 상태 확인
+tail -f /data/diffusion_planner/logs/train_*.out              # 실시간 로그
+```
+
+### 6-5. 결과 확인
+
+```bash
+# 체크포인트 확인
+ls -lh /data/diffusion_planner/output/
+
+# 잡 히스토리
+sacct --format=JobID,JobName,State,Elapsed,AllocGRES -j <JOB_ID>
+
+# 대시보드에서 확인
+# http://<마스터IP>:3080 → Jobs 탭, Experiments 탭
+```
+
 ---
 
 ## 노드 추가
